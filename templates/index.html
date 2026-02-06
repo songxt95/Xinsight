@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小猴编程 - 智能学情看板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <style>
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background-color: #f8fafc; }
+        [x-cloak] { display: none !important; }
+
+        /* 交互式表头输入框 */
+        .cat-input { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; text-align: center; border: 1px solid transparent; outline: none; transition: all 0.2s; cursor: text; width: auto; min-width: 60px; background-color: transparent; }
+        .cat-input:focus { background-color: rgba(255, 255, 255, 0.8); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); color: #333; }
+
+        /* 分类圆点 */
+        .cat-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; cursor: pointer; transition: transform 0.2s; }
+        .cat-dot:hover { transform: scale(1.5); }
+        .dot-class { background-color: #3b82f6; } .dot-hw { background-color: #9333ea; } .dot-exam { background-color: #e11d48; } .dot-custom { background-color: #64748b; }
+
+        /* 分数输入框 */
+        .edit-input { font-size: 12px; padding: 4px 10px; border-radius: 999px; width: auto; min-width: 40px; height: 26px; text-align: center; font-weight: 600; border: 1px solid transparent; outline: none; transition: all 0.2s; cursor: text; white-space: nowrap; }
+        .edit-input:focus { transform: scale(1.05); box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 10; border-color: #94a3b8; }
+
+        /* 状态颜色 */
+        .bg-not-open { background-color: #fee2e2; color: #b91c1c; }
+        .bg-not-answered { background-color: #ffedd5; color: #c2410c; }
+        .bg-not-run { background-color: #fef3c7; color: #b45309; }
+        .bg-partial { background-color: #dbeafe; color: #1d4ed8; }
+        .bg-perfect { background-color: #dcfce7; color: #15803d; }
+        .bg-grayish { background-color: #f1f5f9; color: #64748b; }
+
+        /* 分类背景 */
+        .bg-cat-class { background-color: #eff6ff; color: #1e40af; border-bottom: 2px solid #bfdbfe !important; }
+        .bg-cat-hw { background-color: #faf5ff; color: #6b21a8; border-bottom: 2px solid #e9d5ff !important; }
+        .bg-cat-exam { background-color: #fff1f2; color: #9f1239; border-bottom: 2px solid #fecdd3 !important; }
+        .bg-cat-custom { background-color: #f8fafc; color: #475569; border-bottom: 2px solid #e2e8f0 !important; }
+
+        .class-list-item { transition: background-color 0.2s; }
+        .class-list-item:hover { background-color: #f8fafc; }
+        .cuc-input { width: 50px; text-align: center; border: 1px solid #cbd5e1; border-radius: 4px; padding: 2px; font-size: 12px; margin: 0 4px; }
+        .rotate-180 { transform: rotate(180deg); }
+
+        .score-cell { transition: all 0.2s; }
+        .score-cell:hover { transform: scale(1.1); z-index: 10; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    </style>
+</head>
+<body class="min-h-screen pb-12 text-slate-800">
+
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print">
+        <div class="max-w-[1920px] mx-auto px-4">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <div class="bg-indigo-600 text-white p-1.5 rounded-lg font-bold">XH</div>
+                    <span class="text-lg font-bold text-slate-900">小猴编程·学情看板</span>
+                </div>
+                <div class="flex items-center gap-4" x-data>
+                    {% if show_dashboard %}
+                    <div class="flex items-center bg-slate-100 rounded-lg p-1">
+                        <button @click="$dispatch('zoom-out')" class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-md transition" title="缩小"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></button>
+                        <span class="text-xs font-mono text-slate-500 w-12 text-center select-none">缩放</span>
+                        <button @click="$dispatch('zoom-in')" class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-md transition" title="放大"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg></button>
+                    </div>
+                    <form action="/" method="post" class="inline">
+                        <input type="hidden" name="username" value="{{ username }}">
+                        <input type="hidden" name="password" value="{{ password }}">
+                        <input type="hidden" name="token" value="{{ current_token }}">
+                        <button type="submit" class="text-sm font-medium text-slate-500 hover:text-indigo-600 transition">切换班级</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="w-full px-4 py-8 origin-top-left transition-transform duration-200 ease-out"
+          x-data="tableDataComponent()" x-cloak :style="'zoom: ' + zoomLevel">
+
+        {% if show_class_selector %}
+        <div class="max-w-6xl mx-auto mt-4 flex flex-col gap-6">
+            {% if error %}<div class="bg-red-50 border-l-4 border-red-500 p-4 mb-4"><p class="text-sm text-red-700 font-bold">{{ error }}</p></div>{% endif %}
+
+            <div class="flex flex-col sm:flex-row justify-between items-end sm:items-center pb-4 border-b border-slate-200 gap-4">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">班级列表</h1>
+                    <p class="text-sm text-gray-500 mt-1">
+                        当前用户: <span class="font-medium text-indigo-600">{{ username }}</span>
+                        <span class="mx-2">|</span>
+                        共找到 <span class="font-bold">{{ class_groups.open|length + class_groups.closed|length + class_groups.self|length }}</span> 个班级 ({{ search_range }}天内)
+                    </p>
+                </div>
+                <div class="flex gap-3">
+                    <form method="post" class="flex gap-2">
+                        <input type="hidden" name="username" value="{{ username }}">
+                        <input type="hidden" name="password" value="{{ password }}">
+                        <input type="hidden" name="token" value="{{ token }}">
+
+                        <select name="range" onchange="this.form.submit()" class="border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white hover:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition text-slate-600 cursor-pointer">
+                            <option value="90" {% if search_range==90 %}selected{% endif %}>近3个月</option>
+                            <option value="180" {% if search_range==180 %}selected{% endif %}>近半年</option>
+                            <option value="365" {% if search_range==365 %}selected{% endif %}>近一年</option>
+                        </select>
+
+                        <button type="submit" class="flex items-center gap-1.5 bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 text-slate-600 px-4 py-2 rounded-lg text-sm transition shadow-sm font-medium">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            刷新
+                        </button>
+                    </form>
+
+                    <a href="/logout" class="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm transition font-medium">
+                        退出登录
+                    </a>
+                </div>
+            </div>
+
+            <div class="w-full" x-data="{ expanded: true }"><div class="flex items-center justify-between mb-4 pl-1 cursor-pointer select-none group" @click="expanded = !expanded"><div class="flex items-center gap-3"><span class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-md shadow-indigo-200"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg></span><div><h3 class="text-xl font-bold text-slate-800 group-hover:text-indigo-600 transition">开课中 (Live)</h3><p class="text-xs text-slate-400">共 {{ class_groups['open']|length }} 个班级</p></div></div><svg class="w-5 h-5 text-slate-400 transition-transform duration-200" :class="{'rotate-180': expanded}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg></div><div x-show="expanded" x-collapse><div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="divide-y divide-slate-100">{% for cls in class_groups['open'] %}{% include 'class_row_template.html' %}{% else %}<div class="p-10 text-center text-slate-400 text-sm">暂无正在进行的直播课程</div>{% endfor %}</div></div></div></div>
+
+            <div class="w-full" x-data="{ expanded: false }"><div class="flex items-center justify-between mb-4 pl-1 select-none"><div class="flex items-center gap-3 cursor-pointer group" @click="expanded = !expanded"><span class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-500 text-white shadow-md shadow-slate-200"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span><div><h3 class="text-xl font-bold text-slate-800 group-hover:text-slate-600 transition">已结课 (History)</h3><p class="text-xs text-slate-400">共 {{ class_groups['closed']|length }} 个班级 (点击展开)</p></div></div><div class="flex items-center gap-4"><svg class="w-5 h-5 text-slate-400 transition-transform duration-200 cursor-pointer" @click="expanded = !expanded" :class="{'rotate-180': expanded}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg></div></div><div x-show="expanded" x-collapse><div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="divide-y divide-slate-100">{% for cls in class_groups['closed'] %}{% include 'class_row_template.html' %}{% else %}<div class="p-10 text-center text-slate-400 text-sm">过去 {{ search_range }} 天内无结课记录</div>{% endfor %}</div></div></div></div>
+
+            <div class="w-full pb-12" x-data="{ expanded: false }"><div class="flex items-center justify-between mb-4 pl-1 cursor-pointer select-none group" @click="expanded = !expanded"><div class="flex items-center gap-3"><span class="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-md shadow-emerald-200"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></span><div><h3 class="text-xl font-bold text-slate-800 group-hover:text-emerald-600 transition">自学 / 活动课程</h3><p class="text-xs text-slate-400">共 {{ class_groups['self']|length }} 个班级 (点击展开)</p></div></div><svg class="w-5 h-5 text-slate-400 transition-transform duration-200" :class="{'rotate-180': expanded}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg></div><div x-show="expanded" x-collapse><div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="divide-y divide-slate-100">{% for cls in class_groups['self'] %}{% include 'class_row_template.html' %}{% else %}<div class="p-10 text-center text-slate-400 text-sm">暂无自学课程</div>{% endfor %}</div></div></div></div>
+        </div>
+
+        {% elif show_dashboard %}
+            <div class="flex justify-between items-end mb-6 no-print">
+                <div class="flex gap-6">
+                    <div class="bg-white px-5 py-3 rounded-lg shadow-sm border border-slate-100"><span class="text-xs font-semibold text-slate-400 uppercase block">班级人数</span><span class="text-2xl font-bold text-slate-900">{{ stats.student_count }}</span></div>
+                    <div class="bg-white px-5 py-3 rounded-lg shadow-sm border border-slate-100"><span class="text-xs font-semibold text-slate-400 uppercase block">平均完成率 (总)</span><span class="text-2xl font-bold text-slate-900">{{ stats.avg_progress }}%</span></div>
+                </div>
+                <div class="flex gap-3">
+                    <form action="/" method="post" class="inline">
+                        <input type="hidden" name="token" value="{{ current_token }}">
+                        <input type="hidden" name="classId" value="{{ current_class_id }}">
+                        <input type="hidden" name="cucNum" value="{{ current_cuc_num }}">
+                        <input type="hidden" name="username" value="{{ username }}">
+                        <input type="hidden" name="password" value="{{ password }}">
+                        <input type="hidden" name="className" value="{{ current_class_name }}">
+                        <input type="hidden" name="classYear" value="{{ current_class_year }}">
+
+                        <button type="submit" class="inline-flex items-center px-4 py-2 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-sm font-medium rounded-lg shadow-sm transition h-10" title="重新获取最新数据">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <span class="ml-2">刷新</span>
+                        </button>
+                    </form>
+
+                    <button @click="exportAsImage()" :disabled="isExporting" class="inline-flex items-center px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg shadow-sm transition active:scale-95 w-40 justify-center h-10">
+                        <span x-show="!isExporting" class="flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            导出图片
+                        </span>
+                        <span x-show="isExporting" class="flex items-center gap-2">
+                            <svg class="animate-spin -ml-1 mr-1 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            生成中...
+                        </span>
+                    </button>
+                    <a href="{{ download_url }}" class="inline-flex items-center px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg shadow-sm transition h-10">导出 CSV</a>
+                </div>
+            </div>
+
+            <div id="capture-area" class="bg-white shadow-lg rounded-xl border border-slate-200 mb-8">
+                <div class="pt-6 pb-2 px-6 bg-white flex justify-center items-center" id="capture-header">
+                    <div class="relative group w-full max-w-2xl">
+                        <input type="text" id="lesson-title-input" value="{{ current_lesson_name }}" class="w-full text-2xl font-bold text-center text-slate-800 bg-transparent border border-transparent rounded px-2 py-1 outline-none focus:border-indigo-300 focus:bg-slate-50 transition" title="点击可编辑标题">
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
+                    <div class="flex items-center gap-4">
+                        <h3 class="font-bold text-slate-700">成绩详情</h3>
+                        <div class="flex items-center bg-white border border-slate-200 rounded-md overflow-hidden shadow-sm">
+
+                            <form action="/" method="post" class="inline">
+                                <input type="hidden" name="token" value="{{ current_token }}">
+                                <input type="hidden" name="classId" value="{{ current_class_id }}">
+                                <input type="hidden" name="username" value="{{ username }}">
+                                <input type="hidden" name="password" value="{{ password }}">
+                                <input type="hidden" name="cucNum" value="{{ current_cuc_num - 1 }}">
+                                <input type="hidden" name="className" value="{{ current_class_name }}">
+                                <input type="hidden" name="classYear" value="{{ current_class_year }}">
+
+                                <button type="submit" class="px-2 py-1 hover:bg-slate-50 text-slate-500 disabled:opacity-30 disabled:hover:bg-white" {% if current_cuc_num <= 1 %}disabled{% endif %}>
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                                </button>
+                            </form>
+
+                            <span class="px-3 py-1 text-xs font-bold text-indigo-600 border-x border-slate-100 bg-slate-50">第 {{ current_cuc_num }} 讲</span>
+
+                            <form action="/" method="post" class="inline">
+                                <input type="hidden" name="token" value="{{ current_token }}">
+                                <input type="hidden" name="classId" value="{{ current_class_id }}">
+                                <input type="hidden" name="username" value="{{ username }}">
+                                <input type="hidden" name="password" value="{{ password }}">
+                                <input type="hidden" name="cucNum" value="{{ current_cuc_num + 1 }}">
+                                <input type="hidden" name="className" value="{{ current_class_name }}">
+                                <input type="hidden" name="classYear" value="{{ current_class_year }}">
+
+                                <button type="submit" class="px-2 py-1 hover:bg-slate-50 text-slate-500 disabled:opacity-30 disabled:hover:bg-white" {% if current_cuc_num >= max_lessons %}disabled{% endif %}>
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                                </button>
+                            </form>
+                        </div>
+                        <div class="text-xs text-slate-400 ml-2">排序: <span x-text="sortLabel" class="font-mono text-indigo-600 font-medium"></span></div>
+                    </div>
+                    <div class="relative" x-data="{ open: false }" @click.outside="open = false"><button @click="open = !open; initDropdown()" class="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded text-slate-700 bg-white hover:bg-slate-50">显示设置</button><div x-show="open" class="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-2xl ring-1 ring-black ring-opacity-5 z-50 p-4 border border-slate-100"><div class="mb-4 pb-4 border-b border-slate-100"><p class="text-xs font-semibold text-slate-500 mb-2">列设置</p><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded mb-2 border-b border-slate-50 pb-2"><input type="checkbox" x-model="showProgressCol" class="rounded border-slate-300 text-indigo-600 mr-2"><span class="font-bold">显示“进度”列</span></label><p class="text-xs font-semibold text-slate-500 mb-2">已隐藏: <span x-text="hiddenNames.length"></span></p><button @click="hiddenNames = []" class="w-full text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 rounded mb-4">恢复隐藏</button><p class="text-xs font-semibold text-slate-500 mb-2">题目显示</p><div class="max-h-60 overflow-y-auto space-y-1 mb-3 border border-slate-100 rounded p-1"><template x-for="(col, index) in colNames" :key="index"><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded"><input type="checkbox" :checked="!tempHiddenCols.includes(index)" @change="toggleTempCol(index)" class="rounded border-slate-300 mr-2"><span x-text="col" class="truncate"></span></label></template></div><button @click="applyColumns(); open = false" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded">确认</button></div></div></div>
+                </div>
+
+                <div class="w-full" id="table-scroll-container">
+                    <table class="w-full divide-y divide-slate-100 table-fixed" id="main-table">
+                        <thead class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
+                            <tr class="divide-x divide-slate-100">
+                                <th rowspan="3" @click="sortBy('name')" class="px-2 py-3 text-left sticky left-0 z-10 bg-slate-50 border-r border-slate-200 hover:bg-slate-100 cursor-pointer w-36 align-middle"><div class="flex items-center h-full">姓名 <span class="ml-1 opacity-50 text-[10px]">↕</span></div></th>
+                                <th x-show="showProgressCol" rowspan="3" @click="sortBy('progress')" class="px-2 py-3 text-left hover:bg-slate-100 cursor-pointer w-24 align-middle"><div class="flex items-center h-full">进度 <span class="ml-1 opacity-50 text-[10px]">↕</span></div></th>
+                                <template x-for="(cat, index) in colCategories" :key="'cat-'+index">
+                                    <th x-show="isGroupStart(index) && getGroupSpan(index) > 0" :colspan="getGroupSpan(index)" class="px-1 py-1 text-center border-b border-r border-slate-200" :class="getCategoryClass(cat)">
+                                        <div class="flex items-center justify-center w-full"><input type="text" class="cat-input" :value="cat" @change="updateCategory(index, $el.value)"></div>
+                                    </th>
+                                </template>
+                            </tr>
+                            <tr class="divide-x divide-slate-100">
+                                <template x-for="(order, index) in colOrders" :key="'ord-'+index"><th x-show="!hiddenCols.includes(index)" class="px-1 py-1 text-center font-mono bg-slate-50/50 border-b border-slate-100 text-[10px] text-slate-400"><div class="flex items-center justify-center"><span class="cat-dot" :class="getDotClass(colCategories[index])" @click="cycleCategory(index)" title="点击切换分类"></span><span x-text="order"></span></div></th></template>
+                            </tr>
+                            <tr class="divide-x divide-slate-100">
+                                <template x-for="(header, index) in colNames" :key="'name-'+index"><th x-show="!hiddenCols.includes(index)" @click="sortBy('score', index)" class="px-1 py-2 text-center hover:bg-slate-100 cursor-pointer border-t-0 break-words whitespace-normal align-top bg-white"><div class="flex items-center justify-center h-full text-[10px] leading-tight"><span x-text="header"></span></div></th></template>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                            <template x-for="row in rows" :key="row.name">
+                                <tr x-show="!hiddenNames.includes(row.name)" class="hover:bg-indigo-50/40 transition group text-xs">
+                                    <td class="px-2 py-3 bg-white border-r border-slate-100 font-medium text-slate-900 truncate group/cell relative z-10">
+                                        <div class="flex items-center h-full justify-between gap-1">
+                                            <div class="h-6 w-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold shrink-0"><span x-text="row.name.charAt(0)"></span></div>
+
+                                            <a :href="`/report/student?classId={{ current_class_id }}&className=` + encodeURIComponent('{{ current_class_name }}') + `&classYear={{ current_class_year }}` + `&studentName=` + encodeURIComponent(row.name) + `&studentId=` + (row.studentId || '') + `&token={{ current_token }}`"
+                                               target="_blank"
+                                               class="w-full text-left truncate text-xs font-bold text-slate-700 hover:text-indigo-600 hover:underline cursor-pointer"
+                                               title="点击查看该生完整学情报告"
+                                               x-text="row.name">
+                                            </a>
+
+                                            <button @click="hideRow(row.name)" class="text-slate-300 hover:text-red-500 opacity-0 group-hover/cell:opacity-100 transition px-1 shrink-0" title="隐藏此行"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg></button>
+                                        </div>
+                                    </td>
+                                    <td x-show="showProgressCol" class="px-2 py-3"><div class="flex flex-col gap-1"><span class="font-mono text-slate-500 text-[10px]" x-text="computedProgress(row).text"></span><div class="w-full h-1 bg-slate-200 rounded-full overflow-hidden"><div class="h-full rounded-full transition-all duration-300" :class="{'bg-emerald-500': computedProgress(row).percent == 100, 'bg-indigo-500': computedProgress(row).percent > 60 && computedProgress(row).percent < 100, 'bg-slate-400': computedProgress(row).percent <= 60}" :style="'width: ' + computedProgress(row).percent + '%'"></div></div></div></td>
+                                    <template x-for="(score, index) in row.scores" :key="index"><td x-show="!hiddenCols.includes(index)" class="px-1 py-3 text-center align-middle h-full"><div class="h-8 flex items-center justify-center"><input type="text" x-model="row.scores[index]" class="edit-input" :class="getStatusClass(row.scores[index])"></div></td></template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <script>
+                const rawData = {{ rows_json | safe }};
+                const rawCols = {{ cols_json | safe }};
+                const rawOrders = {{ orders_json | safe }};
+                const rawCategories = {{ cats_json | safe }};
+
+                function tableDataComponent() {
+                    return {
+                        rows: rawData, colNames: rawCols, colOrders: rawOrders, colCategories: rawCategories,
+                        hiddenCols: [], tempHiddenCols: [], hiddenNames: [], sortCol: 'progress', sortAsc: false, sortLabel: '完成进度 (高→低)', isExporting: false, zoomLevel: 1.0, showProgressCol: true,
+
+                        init() { window.addEventListener('zoom-in', () => { if(this.zoomLevel < 2.5) this.zoomLevel += 0.1; }); window.addEventListener('zoom-out', () => { if(this.zoomLevel > 0.5) this.zoomLevel -= 0.1; }); },
+                        initDropdown() { this.tempHiddenCols = [...this.hiddenCols]; },
+                        toggleTempCol(index) { if (this.tempHiddenCols.includes(index)) this.tempHiddenCols = this.tempHiddenCols.filter(i => i !== index); else this.tempHiddenCols.push(index); },
+                        applyColumns() { this.hiddenCols = [...this.tempHiddenCols]; },
+                        hideRow(name) { if (!this.hiddenNames.includes(name)) this.hiddenNames.push(name); },
+                        isPerfect(val) { return val === '100' || val === '答题正确' || val === '已订正'; },
+                        isNumber(val) { if(!val || val==='-' || val==='') return false; return !isNaN(val) && !isNaN(parseFloat(val)); },
+                        isGroupStart(index) { if (index === 0) return true; return this.colCategories[index] !== this.colCategories[index - 1]; },
+                        getGroupSpan(index) { let span = 0; const currentCat = this.colCategories[index]; for (let i = index; i < this.colCategories.length; i++) { if (this.colCategories[i] !== currentCat) break; if (!this.hiddenCols.includes(i)) span++; } return span; },
+                        updateCategory(startIndex, newName) { const oldName = this.colCategories[startIndex]; for (let i = startIndex; i < this.colCategories.length; i++) { if (this.colCategories[i] === oldName) this.colCategories[i] = newName; else break; } },
+                        cycleCategory(index) { const types = ['课堂', '课后', '考试']; const current = this.colCategories[index]; let nextIndex = types.indexOf(current) + 1; if (nextIndex >= types.length) nextIndex = 0; if (types.indexOf(current) === -1) nextIndex = 0; this.colCategories[index] = types[nextIndex]; },
+                        getCategoryClass(cat) { if (cat === '课堂') return 'bg-cat-class'; if (cat === '课后') return 'bg-cat-hw'; if (cat === '考试') return 'bg-cat-exam'; return 'bg-cat-custom'; },
+                        getDotClass(cat) { if (cat === '课堂') return 'dot-class'; if (cat === '课后') return 'dot-hw'; if (cat === '考试') return 'dot-exam'; return 'dot-custom'; },
+                        getStatusClass(score) { if (!score || score === '未打开') return 'bg-not-open'; if (this.isPerfect(score)) return 'bg-perfect'; if (this.isNumber(score)) return 'bg-partial'; if (score.includes('未作答')) return 'bg-not-answered'; if (score.includes('未运行') || score.includes('错误') || score.includes('失败')) return 'bg-not-run'; return 'bg-not-open'; },
+                        computedProgress(row) { let total = 0; let completed = 0; row.scores.forEach((score, index) => { if (!this.hiddenCols.includes(index)) { total++; if (this.isPerfect(score)) completed++; } }); const pct = total === 0 ? 0 : (completed / total) * 100; return { text: `${completed}/${total}`, percent: pct, raw: pct }; },
+                        sortBy(colType, index = null) { let key = colType; if (index !== null) key += '_' + index; if (this.sortCol === key) this.sortAsc = !this.sortAsc; else { this.sortCol = key; this.sortAsc = false; } this.updateLabel(colType); this.doSort(colType, index); },
+                        updateLabel(colType) { const dir = this.sortAsc ? ' (低→高)' : ' (高→低)'; if (colType === 'name') this.sortLabel = '姓名' + dir; else if (colType === 'progress') this.sortLabel = '完成进度' + dir; else this.sortLabel = '单题分数' + dir; },
+                        doSort(colType, index) { this.rows.sort((a, b) => { let valA, valB; if (colType === 'name') { valA = a.name; valB = b.name; return this.sortAsc ? valA.localeCompare(valB, 'zh') : valB.localeCompare(valA, 'zh'); } else if (colType === 'progress') { valA = this.computedProgress(a).raw; valB = this.computedProgress(b).raw; } else if (colType === 'score') { valA = this.parseSortVal(a.scores[index]); valB = this.parseSortVal(b.scores[index]); } if (valA < valB) return this.sortAsc ? -1 : 1; if (valA > valB) return this.sortAsc ? 1 : -1; return 0; }); },
+                        parseSortVal(s) { if (this.isPerfect(s)) return 100; if (!s || s === '未打开' || s === '-') return -1; let n = parseFloat(s); return isNaN(n) ? -1 : n; },
+
+                        exportAsImage() {
+                            this.isExporting = true;
+                            // 1. 同步所有输入框的值到 HTML 属性
+                            const inputs = document.querySelectorAll('input');
+                            inputs.forEach(input => {
+                                if (input.type === 'checkbox' || input.type === 'radio') {
+                                    if (input.checked) input.setAttribute('checked', 'checked');
+                                    else input.removeAttribute('checked');
+                                } else {
+                                    input.setAttribute('value', input.value);
+                                }
+                            });
+
+                            // 2. 禁用 Alpine 并获取 HTML
+                            const rawHtml = document.documentElement.outerHTML;
+                            const processedHtml = rawHtml.replace(/x-data=/g, 'data-x-disabled=');
+                            const screenWidth = window.innerWidth || 1920;
+
+                            const formData = new FormData();
+                            formData.append('html', processedHtml);
+                            formData.append('width', screenWidth);
+                            formData.append('zoom', this.zoomLevel || 1.0);
+                            formData.append('cucNum', "{{ current_cuc_num }}");
+
+                            fetch('/export/image', { method: 'POST', body: formData })
+                            .then(response => {
+                                if (!response.ok) throw new Error('Export failed');
+                                return response.blob();
+                            })
+                            .then(blob => {
+                                const now = new Date();
+                                const dateStr = now.toISOString().slice(0,10).replace(/-/g, "") + "_" + now.toTimeString().slice(0,5).replace(/:/g,"");
+                                const titleInput = document.getElementById('lesson-title-input');
+                                const lessonName = titleInput ? titleInput.value : "{{ current_lesson_name }}";
+                                const className = "{{ current_class_name }}";
+                                const fileName = `${className}_${lessonName}_学情统计_${dateStr}.png`;
+
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.style.display = 'none';
+                                a.href = url;
+                                a.download = fileName;
+                                document.body.appendChild(a);
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+
+                                this.isExporting = false;
+                            })
+                            .catch(error => {
+                                console.error(error);
+                                alert('导出失败，请重试');
+                                this.isExporting = false;
+                            });
+                        }
+                    }
+                }
+            </script>
+        {% endif %}
+    </main>
+</body>
+</html>

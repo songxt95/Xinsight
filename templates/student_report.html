@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ student_name }} - 学情报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <style>
+        /* ... (保留原有的 CSS) ... */
+        .score-box {
+            width: 100%; padding: 4px 8px; display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: bold; border-radius: 6px; line-height: 1.2; text-align: center;
+        }
+        .bg-perfect { background-color: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .bg-pass { background-color: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .bg-fail { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+        .bg-none { background-color: #f8fafc; color: #94a3b8; border: 1px dashed #cbd5e1; }
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-6 font-sans text-slate-800">
+
+    <div id="capture-area" class="max-w-5xl mx-auto space-y-6" x-data="reportData()" x-cloak>
+
+        <div class="flex items-center justify-between flex-wrap gap-4 mb-6 border-b border-slate-200 pb-6">
+            <div class="flex flex-col">
+                <h1 class="text-3xl font-bold text-slate-800 flex items-center gap-2">
+                    <span x-text="params.className" class="text-xl font-normal text-slate-500"></span>
+                    <span class="text-slate-300">/</span>
+                    {{ student_name }}
+                </h1>
+                <div class="text-sm text-slate-400 mt-2 font-medium">学情分析报告 · {{ params.classYear }}</div>
+            </div>
+
+            <div class="flex items-center gap-2 no-print">
+                <button @click="toggleAll()" class="mr-2 px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 bg-white border border-slate-200 hover:shadow-sm rounded-lg transition flex items-center gap-1.5 active:scale-95 w-24 justify-center">
+                    <template x-if="isAllExpanded">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
+                    </template>
+                    <template x-if="!isAllExpanded">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    </template>
+                    <span x-text="isAllExpanded ? '折叠全部' : '展开全部'"></span>
+                </button>
+
+                <button @click="exportAsImage()" :disabled="isExporting" class="text-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-wait transition flex items-center gap-1 border border-transparent px-3 py-1.5 rounded-lg shadow-sm hover:shadow active:scale-95">
+                    <span x-show="!isExporting" class="flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        导出长图
+                    </span>
+                    <span x-show="isExporting" class="flex items-center gap-1">
+                        <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        生成中...
+                    </span>
+                </button>
+
+                <button @click="fetchData()" class="text-sm text-slate-500 hover:text-indigo-600 transition flex items-center gap-1 border border-slate-200 bg-white px-3 py-1.5 rounded-lg shadow-sm hover:shadow active:scale-95">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    刷新
+                </button>
+                <button onclick="window.close()" class="text-sm text-slate-500 hover:text-red-600 transition flex items-center gap-1 border border-slate-200 bg-white px-3 py-1.5 rounded-lg shadow-sm hover:shadow active:scale-95">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    关闭
+                </button>
+            </div>
+        </div>
+
+        <div>
+            <div class="grid grid-cols-3 gap-4">
+                <template x-if="loading">
+                    <div class="contents">
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 h-24 animate-pulse"></div>
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 h-24 animate-pulse"></div>
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 h-24 animate-pulse"></div>
+                    </div>
+                </template>
+                <template x-if="!loading">
+                    <div class="contents">
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">待作答</span>
+                            <span class="text-3xl font-black text-orange-500" x-text="stats['0'] || 0"></span>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">未满分</span>
+                            <span class="text-3xl font-black text-indigo-500" x-text="stats['1'] || 0"></span>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-center">
+                            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">已通过</span>
+                            <span class="text-3xl font-black text-emerald-500" x-text="stats['2'] || 0"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <div class="text-right mt-2 mr-1">
+                <p class="text-[10px] text-slate-400 flex items-center justify-end gap-1">
+                    <svg class="w-3 h-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <span>统计包含未开课但已发布的预习/作业题目</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <div @click="showChart = !showChart" class="p-4 px-6 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition select-none">
+                <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <span>学习成长轨迹</span>
+                    <span x-show="loading" class="text-xs font-normal text-slate-400 animate-pulse">数据计算中...</span>
+                </h3>
+                <div class="text-slate-400 transform transition-transform duration-200" :class="{'rotate-180': !showChart}">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                </div>
+            </div>
+
+            <div x-show="showChart" x-transition.origin.top.duration.300ms class="p-6 pt-2">
+                <div class="relative h-64 w-full">
+                    <div x-show="loading" class="absolute inset-0 flex items-center justify-center text-slate-300 text-sm animate-pulse">
+                        <svg class="animate-spin h-5 w-5 mr-3 text-slate-400" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        正在跨班级聚合数据...
+                    </div>
+                    <canvas id="progressChart" x-show="!loading"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <template x-if="loading">
+                <div class="space-y-4">
+                    <div class="h-32 bg-slate-200 rounded-xl animate-pulse"></div>
+                    <div class="h-32 bg-slate-200 rounded-xl animate-pulse"></div>
+                </div>
+            </template>
+
+            <template x-for="item in history" :key="item.num">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-200">
+                    <div @click="item.expanded = !item.expanded"
+                         class="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-100 select-none transition">
+
+                        <div class="flex items-center gap-3">
+                            <div class="text-slate-400 transform transition-transform duration-200" :class="{'-rotate-90': !item.expanded}">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </div>
+                            <span class="px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-xs font-mono font-bold" x-text="'第 ' + item.num + ' 讲'"></span>
+                            <a :href="`/?token=${params.token}&classId=${params.classId}&cucNum=${item.num}&username=USER&password=PASS&className=${encodeURIComponent(params.className)}&classYear=${params.classYear}`"
+                               target="_blank"
+                               @click.stop
+                               class="font-bold text-slate-700 hover:text-indigo-600 transition flex items-center gap-1 group">
+                                <span x-text="item.name"></span>
+                                <svg class="w-3 h-3 opacity-0 group-hover:opacity-100 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </a>
+                        </div>
+
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-mono font-bold text-slate-500" x-text="item.progress_text"></span>
+                            <div class="w-24 bg-white border border-slate-200 rounded-full h-2 overflow-hidden">
+                                <div class="h-full bg-indigo-500 rounded-full" :style="'width: ' + item.progress_percent + '%'" :class="{'bg-emerald-500': item.progress_percent==100}"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div x-show="item.expanded" class="p-4 bg-white">
+                        <div x-show="item.headers && item.headers.length > 0" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                            <template x-for="(header, idx) in item.headers" :key="idx">
+                                <div class="bg-slate-50 border border-slate-100 rounded-lg p-2 flex flex-col justify-between gap-2 hover:border-indigo-100 transition h-full">
+                                    <div class="text-xs text-slate-500 font-medium leading-tight line-clamp-2 min-h-[2.4em]"
+                                         x-text="header"
+                                         :title="header">
+                                    </div>
+                                    <div class="score-box"
+                                         :class="getScoreClass(item.scores[idx])"
+                                         x-text="item.scores[idx]">
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        <div x-show="!item.headers || item.headers.length === 0" class="text-center py-6 text-slate-300 italic text-sm">
+                            本讲无题目数据
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <div class="text-center text-xs text-slate-300 mt-8 pb-4">Generated by XiaoHou Insight</div>
+    </div>
+
+    <script>
+        function reportData() {
+            return {
+                loading: true,
+                showChart: true,
+                isAllExpanded: true,
+                isExporting: false, // [关键点 3] 导出状态锁
+                stats: {},
+                history: [],
+                chartInstance: null,
+                params: {
+                    token: '{{ params.token }}',
+                    classId: '{{ params.classId }}',
+                    studentName: '{{ params.studentName }}',
+                    studentId: '{{ params.studentId }}',
+                    classYear: '{{ params.classYear }}',
+                    className: '{{ params.className }}'
+                },
+
+                init() {
+                    this.fetchData();
+                },
+
+                toggleAll() {
+                    this.isAllExpanded = !this.isAllExpanded;
+                    this.showChart = this.isAllExpanded;
+                    this.history.forEach(item => item.expanded = this.isAllExpanded);
+                },
+
+                fetchData() {
+                    this.loading = true;
+                    if (this.chartInstance) {
+                        this.chartInstance.destroy();
+                        this.chartInstance = null;
+                    }
+                    this.history = [];
+
+                    const query = new URLSearchParams(this.params).toString();
+                    fetch(`/api/report/student/data?${query}`)
+                        .then(res => res.json())
+                        .then(data => {
+                            this.stats = data.stats;
+                            this.isAllExpanded = true;
+                            this.showChart = true;
+
+                            this.history = data.history.map(item => ({
+                                ...item,
+                                expanded: true
+                            }));
+                            this.loading = false;
+                            setTimeout(() => this.initChart(this.history), 100);
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            alert("数据加载失败");
+                            this.loading = false;
+                        });
+                },
+
+                // [v118 修复] 导出图片逻辑：解决图表无法显示的问题
+                exportAsImage() {
+                    this.isExporting = true;
+
+                    // === 关键修复步骤 START ===
+                    // 1. 获取 Canvas 元素
+                    const canvas = document.getElementById('progressChart');
+                    let originalCanvasDisplay = '';
+                    let tempImg = null;
+
+                    if (canvas) {
+                        // 2. 将 Canvas 内容转为 Base64 图片
+                        const imgUrl = canvas.toDataURL('image/png');
+
+                        // 3. 创建一个 img 标签来暂替 Canvas
+                        tempImg = document.createElement('img');
+                        tempImg.src = imgUrl;
+                        // 保持原有的样式，确保布局一致
+                        tempImg.className = "w-full h-full object-contain";
+
+                        // 4. 执行替换：隐藏 Canvas，插入 Img
+                        originalCanvasDisplay = canvas.style.display;
+                        canvas.style.display = 'none';
+                        canvas.parentNode.insertBefore(tempImg, canvas);
+                    }
+                    // === 关键修复步骤 END ===
+
+                    // 5. 同步 Input 状态 (保持原有逻辑)
+                    const inputs = document.querySelectorAll('input');
+                    inputs.forEach(input => {
+                        if (input.type === 'checkbox' || input.type === 'radio') {
+                            if (input.checked) input.setAttribute('checked', 'checked');
+                            else input.removeAttribute('checked');
+                        } else {
+                            input.setAttribute('value', input.value);
+                        }
+                    });
+
+                    // 6. 获取 HTML (此时图表已经是 img 标签了，后端无需 JS 也能渲染)
+                    const rawHtml = document.documentElement.outerHTML;
+                    // 禁用 Alpine
+                    const processedHtml = rawHtml.replace(/x-data=/g, 'data-x-disabled=');
+                    const screenWidth = 1024;
+
+                    // === 还原 DOM 状态 (用户无感知) ===
+                    if (canvas && tempImg) {
+                        tempImg.remove(); // 移除临时图片
+                        canvas.style.display = originalCanvasDisplay; // 恢复 Canvas 显示
+                    }
+
+                    // 7. 发送请求
+                    const formData = new FormData();
+                    formData.append('html', processedHtml);
+                    formData.append('width', screenWidth);
+                    // 动态文件名
+                    formData.append('filename', `{{ student_name }}_${this.params.className}_学情报告.png`);
+                    formData.append('selector', '#capture-area');
+
+                    fetch('/export/image', { method: 'POST', body: formData })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Export failed');
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        // 文件名逻辑移到了后端参数 filename，这里其实可以简化，但保留也没事
+                        a.download = `{{ student_name }}_学情报告.png`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        this.isExporting = false;
+                    })
+                    .catch(error => {
+                        console.error(error);
+                        alert('导出失败，请重试');
+                        this.isExporting = false;
+                    });
+                },
+
+                getScoreClass(score) {
+                    if (score === '100' || score === '答题正确' || score === '已订正') return 'bg-perfect';
+                    if (!score || score === '未打开' || score === '-' || score === '') return 'bg-none';
+                    if (score.includes('未') || score === '0') return 'bg-fail';
+                    if (!isNaN(parseFloat(score))) return 'bg-pass';
+                    return 'bg-fail';
+                },
+
+                initChart(historyData) {
+                    const ctx = document.getElementById('progressChart').getContext('2d');
+                    const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+                    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
+                    gradient.addColorStop(1, 'rgba(99, 102, 241, 0)');
+
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: historyData.map(h => '第' + h.num + '讲'),
+                            datasets: [{
+                                label: '完成度',
+                                data: historyData.map(h => h.progress_percent),
+                                borderColor: '#6366f1',
+                                backgroundColor: gradient,
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            animation: { duration: 1000 },
+                            scales: {
+                                y: { beginAtZero: true, max: 100, grid: { color: '#f8fafc' } },
+                                x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                            },
+                            plugins: { legend: { display: false } }
+                        }
+                    });
+                }
+            }
+        }
+    </script>
+</body>
+</html>
