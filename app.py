@@ -4,6 +4,7 @@ import json
 import time
 import os
 import secrets
+import logging
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -111,26 +112,38 @@ def index():
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # 简单延时防爆破
-        time.sleep(1)
+        login_log_tag = f"[LoginAttempt:{username}][IP:{request.remote_addr}]"
+        logging.info(f"{login_log_tag} >>> 收到登录请求...")
 
+        start_time = time.time()
         token, error = perform_login(username, password)
+        login_duration = time.time() - start_time
 
-        if token:
+        if not token:
+            # [安全] 失败强制延迟 1 秒
+            logging.info(f"{login_log_tag} 登录失败: {error} (耗时: {login_duration:.2f}s) -> 执行延迟惩罚")
+            time.sleep(1)
+            return render_template('login.html', error=error, default_user=username)
+        else:
             # [关键] 登录成功，写入 Session
+            logging.info(f"{login_log_tag} 验证成功 (耗时: {login_duration:.2f}s)")
             session.permanent = True
             session['token'] = token
             session['username'] = username
 
             # 立即获取列表
+            start_fetch = time.time()
             class_groups, err = fetch_class_list(token, search_range)
+
+            fetch_duration = time.time() - start_fetch
+            logging.info(f"{login_log_tag} 获取班级列表成功 (耗时: {fetch_duration:.2f}s)")
+
             if err:
+                logging.info(f"{login_log_tag} 获取班级列表失败: {err} (耗时: {fetch_duration:.2f}s)")
                 return render_template('login.html', error=err, default_user=username)
 
             return render_template('index.html', show_class_selector=True, class_groups=class_groups,
                                    username=username, token=token, search_range=search_range)
-        else:
-            return render_template('login.html', error=error, default_user=username)
 
     # === 默认场景: 显示登录页 ===
     return render_template('login.html')
@@ -323,13 +336,12 @@ def student_report_data_api():
 if __name__ == '__main__':
     print("========================================")
     print("   XiaoHou Insight - 学情分析助手 Pro")
-    print("   Listening on: http://0.0.0.0:8080")
+    print("   Listening on: http://0.0.0.0:6927")
     print("========================================")
 
     try:
         from waitress import serve
-        # [v119 修改] 端口改为 8080
-        serve(app, host='0.0.0.0', port=8080, threads=6, connection_limit=200)
+        serve(app, host='0.0.0.0', port=6927, threads=20, connection_limit=200)
     except ImportError:
         print("[警告] 未安装 waitress，请安装以支持并发访问。")
-        app.run(debug=False, host='0.0.0.0', port=8080)
+        app.run(debug=False, host='0.0.0.0', port=6927)

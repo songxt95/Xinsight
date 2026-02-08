@@ -19,7 +19,7 @@ def perform_login(username, password):
     data = {'username': username, 'password': password, 'cityCode': '010', 'type': '0'}
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
     try:
-        response = requests.post(url, json=data, headers=headers, timeout=10)
+        response = requests.post(url, json=data, headers=headers, timeout=5)
         if response.status_code != 200: return None, f"HTTP {response.status_code}"
         result = response.json()
         if result.get('status') == 200: return result['data'].get('accessToken'), None
@@ -30,7 +30,7 @@ def fetch_class_curriculum(token, class_id):
     url = f"https://rest.xiaohoucode.com/api/core/teachers/findCurriculumByClass?classId={class_id}"
     headers = { "accept": "application/json, text/plain, */*", "authorization": token, "User-Agent": "Mozilla/5.0", "Origin": "https://www.xiaohoucode.com" }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=5)
         res = response.json()
         data = res.get('data', [])
         lessons = []
@@ -48,9 +48,9 @@ def fetch_class_list(token, search_range=180):
     logging.info(f"--- Fetching Class List (Range: {search_range}) ---")
 
     try:
-        for type_val, group_key, time_range in [(1, 'open', 180), (0, 'closed', search_range)]:
+        for type_val, group_key, time_range in [(1, 'open', 0), (0, 'closed', search_range)]:
             payload = {"type": type_val, "range": time_range, "teacherType": "0", "bizType": 10000}
-            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            response = requests.post(url, json=payload, headers=headers, timeout=5)
             if response.status_code != 200: continue
 
             try:
@@ -101,12 +101,44 @@ def fetch_class_list(token, search_range=180):
     except Exception as e: return None, f"Err: {str(e)}"
 
 def fetch_class_detail(token, class_id):
-    groups, err = fetch_class_list(token, 365)
-    if not err and groups:
-        for g_name in groups:
-            for cls in groups[g_name]:
-                if cls['id'] == class_id: return cls
-    return None
+    # 默认返回值，防止 API 失败导致页面报错
+    current_year = str(datetime.datetime.now().year)
+    result = {'id': class_id, 'name': '班级详情', 'year': current_year}
+
+    headers = {
+        "Authorization": token,
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json, text/plain, */*"
+    }
+
+    # 1. 获取年份 (pullInfo 接口)
+    try:
+        url_year = f"https://rest.xiaohoucode.com/api/core/trace/common/pullInfo?key=classId&value={class_id}"
+        res_year = requests.get(url_year, headers=headers, timeout=2)
+        if res_year.status_code == 200:
+            data = res_year.json().get('data', {})
+            # 用户指定提取字段: year
+            if data and data.get('year'):
+                result['year'] = str(data['year'])
+    except Exception as e:
+        logging.error(f"Fetch Year HTTP Error: {res_year.status_code}")
+    
+    # 2. 获取班级名称 (detail 接口)
+    try:
+        url_name = f"https://rest.xiaohoucode.com/api/core/class/ground/public/detail?classId={class_id}"
+        res_name = requests.get(url_name, headers=headers, timeout=2)
+        if res_name.status_code == 200:
+            data = res_name.json().get('data', {})
+            # 用户指定提取字段: courseName
+            if data and data.get('courseName'):
+                result['name'] = data['courseName']
+    except Exception as e:
+        logging.error(f"Fetch Name HTTP Error: {res_name.status_code}")
+    
+    # 记录日志，看看优化效果
+    logging.info(f"Detail Fetched: {result['name']} ({result['year']})")
+
+    return result
 
 # === [v121 修改] 增加深度 Debug 日志 ===
 def fetch_data(class_id, token, cuc_num):
@@ -124,7 +156,7 @@ def fetch_data(class_id, token, cuc_num):
     headers = {"Authorization": token, "User-Agent": "Mozilla/5.0"}
 
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
 
         # 2. 打印原始响应文本 (只取前1000个字符防止日志爆炸)
         logging.info(f"Response Status: {response.status_code}")
@@ -165,7 +197,7 @@ def fetch_data(class_id, token, cuc_num):
                     if uid not in practice_meta:
                         practice_meta[uid] = {
                             'name': p['practiceName'],
-                            'order_val': float(f"{p.get('bundleOrder',0)}.{p.get('practiceOrder',0)}"),
+                            'order_val': (int(p.get('bundleOrder', 0)), int(p.get('practiceOrder', 0))),
                             'display_order': f"{p.get('bundleOrder',0)}.{p.get('practiceOrder',0)}",
                             'category': label
                         }
@@ -233,7 +265,7 @@ def fetch_student_overall_stats(token, class_ids, student_id, year):
     headers = {"Authorization": token, "User-Agent": "Mozilla/5.0", "Origin": "https://www.xiaohoucode.com"}
     logging.info(f"--- Calling Stats API ---")
     try:
-        res = requests.get(url, params=params, headers=headers, timeout=5).json()
+        res = requests.get(url, params=params, headers=headers, timeout=2).json()
         return res.get('data', {}).get('stats', [])
     except Exception as e:
         return []
