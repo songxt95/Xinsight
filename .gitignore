@@ -1,0 +1,44 @@
+# === Python 基础 ===
+__pycache__/
+*.py[cod]
+*$py.class
+
+# === 虚拟环境 (Virtual Environment) ===
+# 无论你命名为 venv, env 还是 .venv 都能覆盖
+venv/
+env/
+.venv/
+.env
+
+# === IDE 配置 (VS Code / PyCharm) ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === 项目运行时生成的日志 ===
+# 在 data_loader.py 中定义的日志文件
+xiaohou_debug.log
+# 其他通用日志
+*.log
+logs/
+todo.md
+
+# === 导出生成的文件 (保护数据隐私) ===
+# app.py 中生成的 CSV 下载文件
+*.csv
+
+# app.py 中 Playwright 截图生成的图片
+*.png
+# 如果以后有专门的下载目录
+downloads/
+exports/
+
+# === 操作系统生成文件 ===
+.DS_Store
+Thumbs.db
+
+# === Playwright / 浏览器缓存 ===
+# 虽然 Playwright 浏览器通常在系统目录，但防止本地缓存
+browser/
+pw-browsers/

@@ -340,5 +340,72 @@
             </script>
         {% endif %}
     </main>
+    <script>
+        (function() {
+            // 定义一个通用的 Loading 图标 (Tailwind 风格)
+            const spinnerIcon = `
+                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-current inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            `;
+
+            function setButtonLoading(btn) {
+                if (!btn) return;
+                
+                // 1. 记录原始宽度，防止按钮变窄
+                const width = btn.offsetWidth;
+                btn.style.width = `${width}px`;
+                btn.style.justifyContent = 'center';
+                
+                // 2. 变灰、禁用
+                btn.classList.add('opacity-70', 'cursor-not-allowed', 'pointer-events-none');
+                
+                // 3. 插入 Spinner，保留部分原始文本（如果是长按钮）
+                // 如果是小方块（讲次数字），直接替换为 Spinner
+                if (btn.innerText.trim().length <= 2) {
+                    btn.innerHTML = spinnerIcon.replace('mr-2', ''); // 去掉边距
+                } else {
+                    // 长按钮（如“刷新”），加在文字前面
+                    const originalText = btn.innerText.trim();
+                    btn.innerHTML = `${spinnerIcon} <span>加载</span>`;
+                }
+
+                // 4. 【关键】给 Body 加上隐形锁，防止点击页面其他地方
+                document.body.style.cursor = 'wait';
+                // 延时 10ms 锁死全页点击，给用户一个点击反馈的瞬间
+                setTimeout(() => {
+                    document.body.style.pointerEvents = 'none';
+                }, 10);
+            }
+
+            // 监听所有 Form 提交
+            document.addEventListener('submit', function(e) {
+                // 找到触发提交的按钮
+                // 浏览器的 submit 事件本身不包含 submitter 信息，需要通过 activeElement 猜测或 submitter 属性(新浏览器)
+                let submitter = e.submitter;
+                
+                // 如果没有明确的 submitter，尝试找表单里的提交按钮
+                if (!submitter) {
+                    submitter = e.target.querySelector('button[type="submit"]');
+                }
+                
+                if (submitter) {
+                    setButtonLoading(submitter);
+                }
+            });
+
+            // 恢复机制 (页面回退时)
+            window.addEventListener('pageshow', function(event) {
+                if (event.persisted) {
+                    // 恢复点击
+                    document.body.style.pointerEvents = 'auto';
+                    document.body.style.cursor = 'default';
+                    // 刷新页面，简单粗暴恢复按钮状态
+                    window.location.reload();
+                }
+            });
+        })();
+    </script>
 </body>
 </html>

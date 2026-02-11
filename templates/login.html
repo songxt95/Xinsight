@@ -106,6 +106,49 @@
             </div>
         </div>
     </div>
+    <script>
+        (function() {
+            // 定义 Loading 图标
+            const spinnerIcon = `
+                <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            `;
 
+            const form = document.querySelector('form');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    const btn = this.querySelector('button[type="submit"]');
+                    if (!btn) return;
+
+                    // 1. 锁定按钮宽度 (防止文字变短导致按钮突然缩小)
+                    const width = btn.offsetWidth;
+                    btn.style.width = `${width}px`;
+                    
+                    // 2. 变灰、禁用交互
+                    btn.classList.add('opacity-75', 'cursor-not-allowed');
+                    
+                    // 3. 修改内容为 "Spinner + 正在登录..."
+                    btn.innerHTML = `${spinnerIcon} <span>正在登录...</span>`;
+
+                    // 4. 【核心防抖】给整个页面加隐形锁，防止乱点
+                    document.body.style.cursor = 'wait';
+                    // 立即禁用按钮点击，10ms后禁用全页点击
+                    btn.style.pointerEvents = 'none';
+                    setTimeout(() => {
+                        document.body.style.pointerEvents = 'none';
+                    }, 10);
+                });
+            }
+
+            // 页面回退恢复 (防止用户点浏览器“后退”按钮回到登录页时，按钮还是卡死状态)
+            window.addEventListener('pageshow', function(event) {
+                if (event.persisted) {
+                    window.location.reload();
+                }
+            });
+        })();
+    </script>
 </body>
 </html>
