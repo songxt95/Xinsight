@@ -10,6 +10,36 @@
     <script defer src="{{ url_for('static', filename='js/alpine.js') }}"></script>
 
     <style>
+        html {
+            /* 1. 允许滚动，但隐藏默认丑陋的滚动条 */
+            overflow-y: scroll; 
+            /* 兼容 Firefox */
+            scrollbar-width: thin; 
+            scrollbar-color: transparent transparent; 
+        }
+
+        /* 针对 Webkit 浏览器 (Chrome, Edge, Safari) */
+        html::-webkit-scrollbar {
+            width: 8px; /* 设置滚动条宽度 */
+            background: transparent; /* 轨道完全透明 */
+        }
+
+        html::-webkit-scrollbar-thumb {
+            background-color: rgba(156, 163, 175, 0.5); /* 半透明灰色滑块 (Tailwind gray-400) */
+            border-radius: 9999px; /* 圆角 */
+            border: 2px solid transparent; /* 给滑块加个透明边框，让它看起来更细 */
+            background-clip: content-box; /* 让背景只显示在内容区，实现"悬浮"视觉效果 */
+        }
+
+        html::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(107, 114, 128, 0.8); /* 鼠标悬停变深 (Tailwind gray-500) */
+        }
+
+        /* 防止 Firefox 默认滚动条占位 */
+        html {
+            scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+        }
+
         body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background-color: #f8fafc; }
         [x-cloak] { display: none !important; }
 
