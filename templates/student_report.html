@@ -4,11 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ student_name }} - 学情报告</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    
+    <script src="{{ url_for('static', filename='js/tailwindcss.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chart.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/alpine.js') }}"></script>
+
     <style>
-        /* ... (保留原有的 CSS) ... */
         .score-box {
             width: 100%; padding: 4px 8px; display: flex; align-items: center; justify-content: center;
             font-size: 13px; font-weight: bold; border-radius: 6px; line-height: 1.2; text-align: center;
@@ -19,6 +20,182 @@
         .bg-none { background-color: #f8fafc; color: #94a3b8; border: 1px dashed #cbd5e1; }
         [x-cloak] { display: none !important; }
     </style>
+
+    <script>
+        function reportData() {
+            return {
+                loading: true,
+                showChart: true,
+                isAllExpanded: true,
+                isExporting: false,
+                stats: {},
+                history: [],
+                chartInstance: null,
+                params: {
+                    token: '{{ params.token }}',
+                    classId: '{{ params.classId }}',
+                    studentName: '{{ params.studentName }}',
+                    studentId: '{{ params.studentId }}',
+                    classYear: '{{ params.classYear }}',
+                    className: '{{ params.className }}'
+                },
+
+                init() {
+                    this.fetchData();
+                },
+
+                toggleAll() {
+                    this.isAllExpanded = !this.isAllExpanded;
+                    this.showChart = this.isAllExpanded;
+                    this.history.forEach(item => item.expanded = this.isAllExpanded);
+                },
+
+                fetchData() {
+                    this.loading = true;
+                    // 销毁旧图表防止重影
+                    if (this.chartInstance) {
+                        this.chartInstance.destroy();
+                        this.chartInstance = null;
+                    }
+                    this.history = [];
+
+                    const query = new URLSearchParams(this.params).toString();
+                    fetch(`/api/report/student/data?${query}`)
+                        .then(res => res.json())
+                        .then(data => {
+                            this.stats = data.stats;
+                            this.isAllExpanded = true;
+                            this.showChart = true;
+
+                            this.history = data.history.map(item => ({
+                                ...item,
+                                expanded: true
+                            }));
+                            this.loading = false;
+                            // 延时渲染图表，确保 DOM 已更新
+                            setTimeout(() => this.initChart(this.history), 100);
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            alert("数据加载失败");
+                            this.loading = false;
+                        });
+                },
+
+                exportAsImage() {
+                    this.isExporting = true;
+
+                    // === 1. 图表 Canvas 转图片 (防止截图时图表空白) ===
+                    const canvas = document.getElementById('progressChart');
+                    let originalCanvasDisplay = '';
+                    let tempImg = null;
+
+                    if (canvas) {
+                        const imgUrl = canvas.toDataURL('image/png');
+                        tempImg = document.createElement('img');
+                        tempImg.src = imgUrl;
+                        tempImg.className = "w-full h-full object-contain";
+                        originalCanvasDisplay = canvas.style.display;
+                        canvas.style.display = 'none';
+                        canvas.parentNode.insertBefore(tempImg, canvas);
+                    }
+
+                    // === 2. 同步 Input 状态 ===
+                    const inputs = document.querySelectorAll('input');
+                    inputs.forEach(input => {
+                        if (input.type === 'checkbox' || input.type === 'radio') {
+                            if (input.checked) input.setAttribute('checked', 'checked');
+                            else input.removeAttribute('checked');
+                        } else {
+                            input.setAttribute('value', input.value);
+                        }
+                    });
+
+                    // === 3. 获取 HTML 并禁用 Alpine ===
+                    const rawHtml = document.documentElement.outerHTML;
+                    const processedHtml = rawHtml.replace(/x-data=/g, 'data-x-disabled=');
+                    const screenWidth = 1024; // 固定宽度导出
+
+                    // === 4. 还原 DOM ===
+                    if (canvas && tempImg) {
+                        tempImg.remove();
+                        canvas.style.display = originalCanvasDisplay;
+                    }
+
+                    // === 5. 发送请求 ===
+                    const formData = new FormData();
+                    formData.append('html', processedHtml);
+                    formData.append('width', screenWidth);
+                    formData.append('filename', `{{ student_name }}_${this.params.className}_学情报告.png`);
+                    formData.append('selector', '#capture-area');
+
+                    fetch('/export/image', { method: 'POST', body: formData })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Export failed');
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = `{{ student_name }}_学情报告.png`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        this.isExporting = false;
+                    })
+                    .catch(error => {
+                        console.error(error);
+                        alert('导出失败，请重试');
+                        this.isExporting = false;
+                    });
+                },
+
+                getScoreClass(score) {
+                    if (score === '100' || score === '答题正确' || score === '已订正') return 'bg-perfect';
+                    if (!score || score === '未打开' || score === '-' || score === '') return 'bg-none';
+                    if (score.includes('未') || score === '0') return 'bg-fail';
+                    if (!isNaN(parseFloat(score))) return 'bg-pass';
+                    return 'bg-fail';
+                },
+
+                initChart(historyData) {
+                    const ctx = document.getElementById('progressChart').getContext('2d');
+                    const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+                    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
+                    gradient.addColorStop(1, 'rgba(99, 102, 241, 0)');
+
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: historyData.map(h => '第' + h.num + '讲'),
+                            datasets: [{
+                                label: '完成度',
+                                data: historyData.map(h => h.progress_percent),
+                                borderColor: '#6366f1',
+                                backgroundColor: gradient,
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            animation: { duration: 1000 },
+                            scales: {
+                                y: { beginAtZero: true, max: 100, grid: { color: '#f8fafc' } },
+                                x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                            },
+                            plugins: { legend: { display: false } }
+                        }
+                    });
+                }
+            }
+        }
+    </script>
 </head>
 <body class="bg-slate-50 min-h-screen p-6 font-sans text-slate-800">
 
@@ -183,191 +360,5 @@
 
         <div class="text-center text-xs text-slate-300 mt-8 pb-4">Generated by XiaoHou Insight</div>
     </div>
-
-    <script>
-        function reportData() {
-            return {
-                loading: true,
-                showChart: true,
-                isAllExpanded: true,
-                isExporting: false, // [关键点 3] 导出状态锁
-                stats: {},
-                history: [],
-                chartInstance: null,
-                params: {
-                    token: '{{ params.token }}',
-                    classId: '{{ params.classId }}',
-                    studentName: '{{ params.studentName }}',
-                    studentId: '{{ params.studentId }}',
-                    classYear: '{{ params.classYear }}',
-                    className: '{{ params.className }}'
-                },
-
-                init() {
-                    this.fetchData();
-                },
-
-                toggleAll() {
-                    this.isAllExpanded = !this.isAllExpanded;
-                    this.showChart = this.isAllExpanded;
-                    this.history.forEach(item => item.expanded = this.isAllExpanded);
-                },
-
-                fetchData() {
-                    this.loading = true;
-                    if (this.chartInstance) {
-                        this.chartInstance.destroy();
-                        this.chartInstance = null;
-                    }
-                    this.history = [];
-
-                    const query = new URLSearchParams(this.params).toString();
-                    fetch(`/api/report/student/data?${query}`)
-                        .then(res => res.json())
-                        .then(data => {
-                            this.stats = data.stats;
-                            this.isAllExpanded = true;
-                            this.showChart = true;
-
-                            this.history = data.history.map(item => ({
-                                ...item,
-                                expanded: true
-                            }));
-                            this.loading = false;
-                            setTimeout(() => this.initChart(this.history), 100);
-                        })
-                        .catch(err => {
-                            console.error(err);
-                            alert("数据加载失败");
-                            this.loading = false;
-                        });
-                },
-
-                // [v118 修复] 导出图片逻辑：解决图表无法显示的问题
-                exportAsImage() {
-                    this.isExporting = true;
-
-                    // === 关键修复步骤 START ===
-                    // 1. 获取 Canvas 元素
-                    const canvas = document.getElementById('progressChart');
-                    let originalCanvasDisplay = '';
-                    let tempImg = null;
-
-                    if (canvas) {
-                        // 2. 将 Canvas 内容转为 Base64 图片
-                        const imgUrl = canvas.toDataURL('image/png');
-
-                        // 3. 创建一个 img 标签来暂替 Canvas
-                        tempImg = document.createElement('img');
-                        tempImg.src = imgUrl;
-                        // 保持原有的样式，确保布局一致
-                        tempImg.className = "w-full h-full object-contain";
-
-                        // 4. 执行替换：隐藏 Canvas，插入 Img
-                        originalCanvasDisplay = canvas.style.display;
-                        canvas.style.display = 'none';
-                        canvas.parentNode.insertBefore(tempImg, canvas);
-                    }
-                    // === 关键修复步骤 END ===
-
-                    // 5. 同步 Input 状态 (保持原有逻辑)
-                    const inputs = document.querySelectorAll('input');
-                    inputs.forEach(input => {
-                        if (input.type === 'checkbox' || input.type === 'radio') {
-                            if (input.checked) input.setAttribute('checked', 'checked');
-                            else input.removeAttribute('checked');
-                        } else {
-                            input.setAttribute('value', input.value);
-                        }
-                    });
-
-                    // 6. 获取 HTML (此时图表已经是 img 标签了，后端无需 JS 也能渲染)
-                    const rawHtml = document.documentElement.outerHTML;
-                    // 禁用 Alpine
-                    const processedHtml = rawHtml.replace(/x-data=/g, 'data-x-disabled=');
-                    const screenWidth = 1024;
-
-                    // === 还原 DOM 状态 (用户无感知) ===
-                    if (canvas && tempImg) {
-                        tempImg.remove(); // 移除临时图片
-                        canvas.style.display = originalCanvasDisplay; // 恢复 Canvas 显示
-                    }
-
-                    // 7. 发送请求
-                    const formData = new FormData();
-                    formData.append('html', processedHtml);
-                    formData.append('width', screenWidth);
-                    // 动态文件名
-                    formData.append('filename', `{{ student_name }}_${this.params.className}_学情报告.png`);
-                    formData.append('selector', '#capture-area');
-
-                    fetch('/export/image', { method: 'POST', body: formData })
-                    .then(response => {
-                        if (!response.ok) throw new Error('Export failed');
-                        return response.blob();
-                    })
-                    .then(blob => {
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.style.display = 'none';
-                        a.href = url;
-                        // 文件名逻辑移到了后端参数 filename，这里其实可以简化，但保留也没事
-                        a.download = `{{ student_name }}_学情报告.png`;
-                        document.body.appendChild(a);
-                        a.click();
-                        window.URL.revokeObjectURL(url);
-                        this.isExporting = false;
-                    })
-                    .catch(error => {
-                        console.error(error);
-                        alert('导出失败，请重试');
-                        this.isExporting = false;
-                    });
-                },
-
-                getScoreClass(score) {
-                    if (score === '100' || score === '答题正确' || score === '已订正') return 'bg-perfect';
-                    if (!score || score === '未打开' || score === '-' || score === '') return 'bg-none';
-                    if (score.includes('未') || score === '0') return 'bg-fail';
-                    if (!isNaN(parseFloat(score))) return 'bg-pass';
-                    return 'bg-fail';
-                },
-
-                initChart(historyData) {
-                    const ctx = document.getElementById('progressChart').getContext('2d');
-                    const gradient = ctx.createLinearGradient(0, 0, 0, 300);
-                    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
-                    gradient.addColorStop(1, 'rgba(99, 102, 241, 0)');
-
-                    this.chartInstance = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: historyData.map(h => '第' + h.num + '讲'),
-                            datasets: [{
-                                label: '完成度',
-                                data: historyData.map(h => h.progress_percent),
-                                borderColor: '#6366f1',
-                                backgroundColor: gradient,
-                                borderWidth: 2,
-                                fill: true,
-                                tension: 0.3,
-                                pointRadius: 3
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            animation: { duration: 1000 },
-                            scales: {
-                                y: { beginAtZero: true, max: 100, grid: { color: '#f8fafc' } },
-                                x: { grid: { display: false }, ticks: { font: { size: 10 } } }
-                            },
-                            plugins: { legend: { display: false } }
-                        }
-                    });
-                }
-            }
-        }
-    </script>
 </body>
 </html>

@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>小猴编程 - 智能学情看板</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    
+    <script src="{{ url_for('static', filename='js/tailwindcss.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/alpine-collapse.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/alpine.js') }}"></script>
+
     <style>
         body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background-color: #f8fafc; }
         [x-cloak] { display: none !important; }
@@ -46,6 +48,101 @@
         .score-cell { transition: all 0.2s; }
         .score-cell:hover { transform: scale(1.1); z-index: 10; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     </style>
+
+    {% if show_dashboard %}
+    <script>
+        const rawData = {{ rows_json | safe }};
+        const rawCols = {{ cols_json | safe }};
+        const rawOrders = {{ orders_json | safe }};
+        const rawCategories = {{ cats_json | safe }};
+
+        function tableDataComponent() {
+            return {
+                rows: rawData, colNames: rawCols, colOrders: rawOrders, colCategories: rawCategories,
+                hiddenCols: [], tempHiddenCols: [], hiddenNames: [], sortCol: 'progress', sortAsc: false, sortLabel: '完成进度 (高→低)', isExporting: false, zoomLevel: 1.0, showProgressCol: true,
+
+                init() { window.addEventListener('zoom-in', () => { if(this.zoomLevel < 2.5) this.zoomLevel += 0.1; }); window.addEventListener('zoom-out', () => { if(this.zoomLevel > 0.5) this.zoomLevel -= 0.1; }); },
+                initDropdown() { this.tempHiddenCols = [...this.hiddenCols]; },
+                toggleTempCol(index) { if (this.tempHiddenCols.includes(index)) this.tempHiddenCols = this.tempHiddenCols.filter(i => i !== index); else this.tempHiddenCols.push(index); },
+                applyColumns() { this.hiddenCols = [...this.tempHiddenCols]; },
+                hideRow(name) { if (!this.hiddenNames.includes(name)) this.hiddenNames.push(name); },
+                isPerfect(val) { return val === '100' || val === '答题正确' || val === '已订正'; },
+                isNumber(val) { if(!val || val==='-' || val==='') return false; return !isNaN(val) && !isNaN(parseFloat(val)); },
+                isGroupStart(index) { if (index === 0) return true; return this.colCategories[index] !== this.colCategories[index - 1]; },
+                getGroupSpan(index) { let span = 0; const currentCat = this.colCategories[index]; for (let i = index; i < this.colCategories.length; i++) { if (this.colCategories[i] !== currentCat) break; if (!this.hiddenCols.includes(i)) span++; } return span; },
+                updateCategory(startIndex, newName) { const oldName = this.colCategories[startIndex]; for (let i = startIndex; i < this.colCategories.length; i++) { if (this.colCategories[i] === oldName) this.colCategories[i] = newName; else break; } },
+                cycleCategory(index) { const types = ['课堂', '课后', '考试']; const current = this.colCategories[index]; let nextIndex = types.indexOf(current) + 1; if (nextIndex >= types.length) nextIndex = 0; if (types.indexOf(current) === -1) nextIndex = 0; this.colCategories[index] = types[nextIndex]; },
+                getCategoryClass(cat) { if (cat === '课堂') return 'bg-cat-class'; if (cat === '课后') return 'bg-cat-hw'; if (cat === '考试') return 'bg-cat-exam'; return 'bg-cat-custom'; },
+                getDotClass(cat) { if (cat === '课堂') return 'dot-class'; if (cat === '课后') return 'dot-hw'; if (cat === '考试') return 'dot-exam'; return 'dot-custom'; },
+                getStatusClass(score) { if (!score || score === '未打开') return 'bg-not-open'; if (this.isPerfect(score)) return 'bg-perfect'; if (this.isNumber(score)) return 'bg-partial'; if (score.includes('未作答')) return 'bg-not-answered'; if (score.includes('未运行') || score.includes('错误') || score.includes('失败')) return 'bg-not-run'; return 'bg-not-open'; },
+                computedProgress(row) { let total = 0; let completed = 0; row.scores.forEach((score, index) => { if (!this.hiddenCols.includes(index)) { total++; if (this.isPerfect(score)) completed++; } }); const pct = total === 0 ? 0 : (completed / total) * 100; return { text: `${completed}/${total}`, percent: pct, raw: pct }; },
+                sortBy(colType, index = null) { let key = colType; if (index !== null) key += '_' + index; if (this.sortCol === key) this.sortAsc = !this.sortAsc; else { this.sortCol = key; this.sortAsc = false; } this.updateLabel(colType); this.doSort(colType, index); },
+                updateLabel(colType) { const dir = this.sortAsc ? ' (低→高)' : ' (高→低)'; if (colType === 'name') this.sortLabel = '姓名' + dir; else if (colType === 'progress') this.sortLabel = '完成进度' + dir; else this.sortLabel = '单题分数' + dir; },
+                doSort(colType, index) { this.rows.sort((a, b) => { let valA, valB; if (colType === 'name') { valA = a.name; valB = b.name; return this.sortAsc ? valA.localeCompare(valB, 'zh') : valB.localeCompare(valA, 'zh'); } else if (colType === 'progress') { valA = this.computedProgress(a).raw; valB = this.computedProgress(b).raw; } else if (colType === 'score') { valA = this.parseSortVal(a.scores[index]); valB = this.parseSortVal(b.scores[index]); } if (valA < valB) return this.sortAsc ? -1 : 1; if (valA > valB) return this.sortAsc ? 1 : -1; return 0; }); },
+                parseSortVal(s) { if (this.isPerfect(s)) return 100; if (!s || s === '未打开' || s === '-') return -1; let n = parseFloat(s); return isNaN(n) ? -1 : n; },
+
+                exportAsImage() {
+                    this.isExporting = true;
+                    // 1. 同步所有输入框的值到 HTML 属性
+                    const inputs = document.querySelectorAll('input');
+                    inputs.forEach(input => {
+                        if (input.type === 'checkbox' || input.type === 'radio') {
+                            if (input.checked) input.setAttribute('checked', 'checked');
+                            else input.removeAttribute('checked');
+                        } else {
+                            input.setAttribute('value', input.value);
+                        }
+                    });
+
+                    // 2. 禁用 Alpine 并获取 HTML
+                    const rawHtml = document.documentElement.outerHTML;
+                    const processedHtml = rawHtml.replace(/x-data=/g, 'data-x-disabled=');
+                    const screenWidth = window.innerWidth || 1920;
+
+                    const formData = new FormData();
+                    formData.append('html', processedHtml);
+                    formData.append('width', screenWidth);
+                    formData.append('zoom', this.zoomLevel || 1.0);
+                    formData.append('cucNum', "{{ current_cuc_num }}");
+
+                    fetch('/export/image', { method: 'POST', body: formData })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Export failed');
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const now = new Date();
+                        const dateStr = now.toISOString().slice(0,10).replace(/-/g, "") + "_" + now.toTimeString().slice(0,5).replace(/:/g,"");
+                        const titleInput = document.getElementById('lesson-title-input');
+                        const lessonName = titleInput ? titleInput.value : "{{ current_lesson_name }}";
+                        const className = "{{ current_class_name }}";
+                        const fileName = `${className}_${lessonName}_学情统计_${dateStr}.png`;
+
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = fileName;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+
+                        this.isExporting = false;
+                    })
+                    .catch(error => {
+                        console.error(error);
+                        alert('导出失败，请重试');
+                        this.isExporting = false;
+                    });
+                }
+            }
+        }
+    </script>
+    {% else %}
+    <script>
+        function tableDataComponent() { return { zoomLevel: 1.0 }; }
+    </script>
+    {% endif %}
 </head>
 <body class="min-h-screen pb-12 text-slate-800">
 
@@ -202,7 +299,7 @@
                         </div>
                         <div class="text-xs text-slate-400 ml-2">排序: <span x-text="sortLabel" class="font-mono text-indigo-600 font-medium"></span></div>
                     </div>
-                    <div class="relative" x-data="{ open: false }" @click.outside="open = false"><button @click="open = !open; initDropdown()" class="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded text-slate-700 bg-white hover:bg-slate-50">显示设置</button><div x-show="open" class="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-2xl ring-1 ring-black ring-opacity-5 z-50 p-4 border border-slate-100"><div class="mb-4 pb-4 border-b border-slate-100"><p class="text-xs font-semibold text-slate-500 mb-2">列设置</p><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded mb-2 border-b border-slate-50 pb-2"><input type="checkbox" x-model="showProgressCol" class="rounded border-slate-300 text-indigo-600 mr-2"><span class="font-bold">显示“进度”列</span></label><p class="text-xs font-semibold text-slate-500 mb-2">已隐藏: <span x-text="hiddenNames.length"></span></p><button @click="hiddenNames = []" class="w-full text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 rounded mb-4">恢复隐藏</button><p class="text-xs font-semibold text-slate-500 mb-2">题目显示</p><div class="max-h-60 overflow-y-auto space-y-1 mb-3 border border-slate-100 rounded p-1"><template x-for="(col, index) in colNames" :key="index"><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded"><input type="checkbox" :checked="!tempHiddenCols.includes(index)" @change="toggleTempCol(index)" class="rounded border-slate-300 mr-2"><span x-text="col" class="truncate"></span></label></template></div><button @click="applyColumns(); open = false" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded">确认</button></div></div></div>
+                    <div class="relative" x-data="{ open: false }" @click.outside="open = false"><button @click="open = !open; initDropdown()" class="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded text-slate-700 bg-white hover:bg-slate-50">显示设置</button><div x-show="open" class="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-2xl ring-1 ring-black ring-opacity-5 z-50 p-4 border border-slate-100"><div class="mb-4 pb-4 border-b border-slate-100"><p class="text-xs font-semibold text-slate-500 mb-2">列设置</p><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded mb-2 border-b border-slate-50 pb-2"><input type="checkbox" name="toggle_progress_col" x-model="showProgressCol" class="rounded border-slate-300 text-indigo-600 mr-2"><span class="font-bold">显示“进度”列</span></label><p class="text-xs font-semibold text-slate-500 mb-2">已隐藏: <span x-text="hiddenNames.length"></span></p><button @click="hiddenNames = []" class="w-full text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 rounded mb-4">恢复隐藏</button><p class="text-xs font-semibold text-slate-500 mb-2">题目显示</p><div class="max-h-60 overflow-y-auto space-y-1 mb-3 border border-slate-100 rounded p-1"><template x-for="(col, index) in colNames" :key="index"><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded"><input type="checkbox" name="toggle_col_visibility" :checked="!tempHiddenCols.includes(index)" @change="toggleTempCol(index)" class="rounded border-slate-300 mr-2"><span x-text="col" class="truncate"></span></label></template></div><button @click="applyColumns(); open = false" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded">确认</button></div></div></div>
                 </div>
 
                 <div class="w-full" id="table-scroll-container">
@@ -213,7 +310,7 @@
                                 <th x-show="showProgressCol" rowspan="3" @click="sortBy('progress')" class="px-2 py-3 text-left hover:bg-slate-100 cursor-pointer w-24 align-middle"><div class="flex items-center h-full">进度 <span class="ml-1 opacity-50 text-[10px]">↕</span></div></th>
                                 <template x-for="(cat, index) in colCategories" :key="'cat-'+index">
                                     <th x-show="isGroupStart(index) && getGroupSpan(index) > 0" :colspan="getGroupSpan(index)" class="px-1 py-1 text-center border-b border-r border-slate-200" :class="getCategoryClass(cat)">
-                                        <div class="flex items-center justify-center w-full"><input type="text" class="cat-input" :value="cat" @change="updateCategory(index, $el.value)"></div>
+                                        <div class="flex items-center justify-center w-full"><input type="text" name="category_header" autocomplete="off" class="cat-input" :value="cat" @change="updateCategory(index, $el.value)"></div>
                                     </th>
                                 </template>
                             </tr>
@@ -242,104 +339,16 @@
                                         </div>
                                     </td>
                                     <td x-show="showProgressCol" class="px-2 py-3"><div class="flex flex-col gap-1"><span class="font-mono text-slate-500 text-[10px]" x-text="computedProgress(row).text"></span><div class="w-full h-1 bg-slate-200 rounded-full overflow-hidden"><div class="h-full rounded-full transition-all duration-300" :class="{'bg-emerald-500': computedProgress(row).percent == 100, 'bg-indigo-500': computedProgress(row).percent > 60 && computedProgress(row).percent < 100, 'bg-slate-400': computedProgress(row).percent <= 60}" :style="'width: ' + computedProgress(row).percent + '%'"></div></div></div></td>
-                                    <template x-for="(score, index) in row.scores" :key="index"><td x-show="!hiddenCols.includes(index)" class="px-1 py-3 text-center align-middle h-full"><div class="h-8 flex items-center justify-center"><input type="text" x-model="row.scores[index]" class="edit-input" :class="getStatusClass(row.scores[index])"></div></td></template>
+                                    <template x-for="(score, index) in row.scores" :key="index"><td x-show="!hiddenCols.includes(index)" class="px-1 py-3 text-center align-middle h-full"><div class="h-8 flex items-center justify-center"><input type="text" name="student_score" autocomplete="off" x-model="row.scores[index]" class="edit-input" :class="getStatusClass(row.scores[index])"></div></td></template>
                                 </tr>
                             </template>
                         </tbody>
                     </table>
                 </div>
             </div>
-
-            <script>
-                const rawData = {{ rows_json | safe }};
-                const rawCols = {{ cols_json | safe }};
-                const rawOrders = {{ orders_json | safe }};
-                const rawCategories = {{ cats_json | safe }};
-
-                function tableDataComponent() {
-                    return {
-                        rows: rawData, colNames: rawCols, colOrders: rawOrders, colCategories: rawCategories,
-                        hiddenCols: [], tempHiddenCols: [], hiddenNames: [], sortCol: 'progress', sortAsc: false, sortLabel: '完成进度 (高→低)', isExporting: false, zoomLevel: 1.0, showProgressCol: true,
-
-                        init() { window.addEventListener('zoom-in', () => { if(this.zoomLevel < 2.5) this.zoomLevel += 0.1; }); window.addEventListener('zoom-out', () => { if(this.zoomLevel > 0.5) this.zoomLevel -= 0.1; }); },
-                        initDropdown() { this.tempHiddenCols = [...this.hiddenCols]; },
-                        toggleTempCol(index) { if (this.tempHiddenCols.includes(index)) this.tempHiddenCols = this.tempHiddenCols.filter(i => i !== index); else this.tempHiddenCols.push(index); },
-                        applyColumns() { this.hiddenCols = [...this.tempHiddenCols]; },
-                        hideRow(name) { if (!this.hiddenNames.includes(name)) this.hiddenNames.push(name); },
-                        isPerfect(val) { return val === '100' || val === '答题正确' || val === '已订正'; },
-                        isNumber(val) { if(!val || val==='-' || val==='') return false; return !isNaN(val) && !isNaN(parseFloat(val)); },
-                        isGroupStart(index) { if (index === 0) return true; return this.colCategories[index] !== this.colCategories[index - 1]; },
-                        getGroupSpan(index) { let span = 0; const currentCat = this.colCategories[index]; for (let i = index; i < this.colCategories.length; i++) { if (this.colCategories[i] !== currentCat) break; if (!this.hiddenCols.includes(i)) span++; } return span; },
-                        updateCategory(startIndex, newName) { const oldName = this.colCategories[startIndex]; for (let i = startIndex; i < this.colCategories.length; i++) { if (this.colCategories[i] === oldName) this.colCategories[i] = newName; else break; } },
-                        cycleCategory(index) { const types = ['课堂', '课后', '考试']; const current = this.colCategories[index]; let nextIndex = types.indexOf(current) + 1; if (nextIndex >= types.length) nextIndex = 0; if (types.indexOf(current) === -1) nextIndex = 0; this.colCategories[index] = types[nextIndex]; },
-                        getCategoryClass(cat) { if (cat === '课堂') return 'bg-cat-class'; if (cat === '课后') return 'bg-cat-hw'; if (cat === '考试') return 'bg-cat-exam'; return 'bg-cat-custom'; },
-                        getDotClass(cat) { if (cat === '课堂') return 'dot-class'; if (cat === '课后') return 'dot-hw'; if (cat === '考试') return 'dot-exam'; return 'dot-custom'; },
-                        getStatusClass(score) { if (!score || score === '未打开') return 'bg-not-open'; if (this.isPerfect(score)) return 'bg-perfect'; if (this.isNumber(score)) return 'bg-partial'; if (score.includes('未作答')) return 'bg-not-answered'; if (score.includes('未运行') || score.includes('错误') || score.includes('失败')) return 'bg-not-run'; return 'bg-not-open'; },
-                        computedProgress(row) { let total = 0; let completed = 0; row.scores.forEach((score, index) => { if (!this.hiddenCols.includes(index)) { total++; if (this.isPerfect(score)) completed++; } }); const pct = total === 0 ? 0 : (completed / total) * 100; return { text: `${completed}/${total}`, percent: pct, raw: pct }; },
-                        sortBy(colType, index = null) { let key = colType; if (index !== null) key += '_' + index; if (this.sortCol === key) this.sortAsc = !this.sortAsc; else { this.sortCol = key; this.sortAsc = false; } this.updateLabel(colType); this.doSort(colType, index); },
-                        updateLabel(colType) { const dir = this.sortAsc ? ' (低→高)' : ' (高→低)'; if (colType === 'name') this.sortLabel = '姓名' + dir; else if (colType === 'progress') this.sortLabel = '完成进度' + dir; else this.sortLabel = '单题分数' + dir; },
-                        doSort(colType, index) { this.rows.sort((a, b) => { let valA, valB; if (colType === 'name') { valA = a.name; valB = b.name; return this.sortAsc ? valA.localeCompare(valB, 'zh') : valB.localeCompare(valA, 'zh'); } else if (colType === 'progress') { valA = this.computedProgress(a).raw; valB = this.computedProgress(b).raw; } else if (colType === 'score') { valA = this.parseSortVal(a.scores[index]); valB = this.parseSortVal(b.scores[index]); } if (valA < valB) return this.sortAsc ? -1 : 1; if (valA > valB) return this.sortAsc ? 1 : -1; return 0; }); },
-                        parseSortVal(s) { if (this.isPerfect(s)) return 100; if (!s || s === '未打开' || s === '-') return -1; let n = parseFloat(s); return isNaN(n) ? -1 : n; },
-
-                        exportAsImage() {
-                            this.isExporting = true;
-                            // 1. 同步所有输入框的值到 HTML 属性
-                            const inputs = document.querySelectorAll('input');
-                            inputs.forEach(input => {
-                                if (input.type === 'checkbox' || input.type === 'radio') {
-                                    if (input.checked) input.setAttribute('checked', 'checked');
-                                    else input.removeAttribute('checked');
-                                } else {
-                                    input.setAttribute('value', input.value);
-                                }
-                            });
-
-                            // 2. 禁用 Alpine 并获取 HTML
-                            const rawHtml = document.documentElement.outerHTML;
-                            const processedHtml = rawHtml.replace(/x-data=/g, 'data-x-disabled=');
-                            const screenWidth = window.innerWidth || 1920;
-
-                            const formData = new FormData();
-                            formData.append('html', processedHtml);
-                            formData.append('width', screenWidth);
-                            formData.append('zoom', this.zoomLevel || 1.0);
-                            formData.append('cucNum', "{{ current_cuc_num }}");
-
-                            fetch('/export/image', { method: 'POST', body: formData })
-                            .then(response => {
-                                if (!response.ok) throw new Error('Export failed');
-                                return response.blob();
-                            })
-                            .then(blob => {
-                                const now = new Date();
-                                const dateStr = now.toISOString().slice(0,10).replace(/-/g, "") + "_" + now.toTimeString().slice(0,5).replace(/:/g,"");
-                                const titleInput = document.getElementById('lesson-title-input');
-                                const lessonName = titleInput ? titleInput.value : "{{ current_lesson_name }}";
-                                const className = "{{ current_class_name }}";
-                                const fileName = `${className}_${lessonName}_学情统计_${dateStr}.png`;
-
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.style.display = 'none';
-                                a.href = url;
-                                a.download = fileName;
-                                document.body.appendChild(a);
-                                a.click();
-                                window.URL.revokeObjectURL(url);
-
-                                this.isExporting = false;
-                            })
-                            .catch(error => {
-                                console.error(error);
-                                alert('导出失败，请重试');
-                                this.isExporting = false;
-                            });
-                        }
-                    }
-                }
-            </script>
         {% endif %}
     </main>
+
     <script>
         (function() {
             // 定义一个通用的 Loading 图标 (Tailwind 风格)
@@ -353,55 +362,39 @@
             function setButtonLoading(btn) {
                 if (!btn) return;
                 
-                // 1. 记录原始宽度，防止按钮变窄
                 const width = btn.offsetWidth;
                 btn.style.width = `${width}px`;
                 btn.style.justifyContent = 'center';
                 
-                // 2. 变灰、禁用
                 btn.classList.add('opacity-70', 'cursor-not-allowed', 'pointer-events-none');
                 
-                // 3. 插入 Spinner，保留部分原始文本（如果是长按钮）
-                // 如果是小方块（讲次数字），直接替换为 Spinner
                 if (btn.innerText.trim().length <= 2) {
-                    btn.innerHTML = spinnerIcon.replace('mr-2', ''); // 去掉边距
+                    btn.innerHTML = spinnerIcon.replace('mr-2', ''); 
                 } else {
-                    // 长按钮（如“刷新”），加在文字前面
                     const originalText = btn.innerText.trim();
                     btn.innerHTML = `${spinnerIcon} <span>加载</span>`;
                 }
 
-                // 4. 【关键】给 Body 加上隐形锁，防止点击页面其他地方
                 document.body.style.cursor = 'wait';
-                // 延时 10ms 锁死全页点击，给用户一个点击反馈的瞬间
                 setTimeout(() => {
                     document.body.style.pointerEvents = 'none';
                 }, 10);
             }
 
-            // 监听所有 Form 提交
             document.addEventListener('submit', function(e) {
-                // 找到触发提交的按钮
-                // 浏览器的 submit 事件本身不包含 submitter 信息，需要通过 activeElement 猜测或 submitter 属性(新浏览器)
                 let submitter = e.submitter;
-                
-                // 如果没有明确的 submitter，尝试找表单里的提交按钮
                 if (!submitter) {
                     submitter = e.target.querySelector('button[type="submit"]');
                 }
-                
                 if (submitter) {
                     setButtonLoading(submitter);
                 }
             });
 
-            // 恢复机制 (页面回退时)
             window.addEventListener('pageshow', function(event) {
                 if (event.persisted) {
-                    // 恢复点击
                     document.body.style.pointerEvents = 'auto';
                     document.body.style.cursor = 'default';
-                    // 刷新页面，简单粗暴恢复按钮状态
                     window.location.reload();
                 }
             });
