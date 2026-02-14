@@ -45,6 +45,8 @@ def fetch_class_list(token, search_range=180):
     headers = { "Host": "rest.xiaohoucode.com", "Authorization": token, "User-Agent": "Mozilla/5.0", "Content-Type": "application/json", "Origin": "https://www.xiaohoucode.com" }
     groups = { 'open': [], 'closed': [], 'self': [] }
 
+    today_date = datetime.datetime.now().date()
+
     logging.info(f"--- Fetching Class List (Range: {search_range}) ---")
 
     try:
@@ -79,6 +81,17 @@ def fetch_class_list(token, search_range=180):
                     preloaded_lessons.sort(key=lambda x: x['num'])
 
                 is_live = (r.get('classType', 0) != 0)
+
+                # 结课当天的课保留在开课中
+                end_time_str = r.get('endTime', '2099-12-31')
+                try:
+                    end_time = datetime.datetime.strptime(end_time_str, "%Y-%m-%d").date()
+                except:
+                    end_time = datetime.datetime.strptime('2099-12-31', "%Y-%m-%d").date() # 结课时间API有问题，兜底
+                status_val = type_val
+                if end_time >= today_date:
+                    status_val = 1
+                
                 item = {
                     'id': r.get('id'),
                     'name': r.get('className') or r.get('name'),
@@ -86,15 +99,18 @@ def fetch_class_list(token, search_range=180):
                     'time': r.get('classTimeDisplay', '') or ("直播时段" if is_live else "自学"),
                     'count': len(preloaded_lessons) if preloaded_lessons else r.get('classNum', 0),
                     'type': '直播' if is_live else '自学',
-                    'status': type_val,
+                    'status': status_val,
                     'year': str(r.get('year', '')),
                     'termName': r.get('termName', ''),
                     'startDate': r.get('startTime', ''),
+                    'endTime': r.get('endTime', ''),
                     'lessons': preloaded_lessons
                 }
 
+                
+
                 if is_live:
-                    if type_val == 1: groups['open'].append(item)
+                    if status_val == 1: groups['open'].append(item)
                     else: groups['closed'].append(item)
                 else: groups['self'].append(item)
         return groups, None
