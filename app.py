@@ -28,6 +28,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 def index():
     # [关键修改] 从 Session 获取当前用户的 Token，实现多人隔离
     token = session.get('token')
+    teacherType = session.get('teacherType', '0')
     username = session.get('username', '')
 
     # 辅助参数 (单讲看板用)
@@ -62,7 +63,7 @@ def index():
                     current_lesson_name = f"第 {cuc_num} 讲 {l['name']}"
                     break
 
-        headers, rows, practice_names, orders, categories, stats = fetch_data(class_id, token, cuc_num)
+        headers, rows, practice_names, orders, categories, stats = fetch_data(class_id, token, cuc_num, teacherType)
 
         if not headers:
              session.clear() # Token失效，清理Session
@@ -84,6 +85,7 @@ def index():
                                current_token=token,
                                username=username,
                                password="***", # 密码不再透传到前端
+                               teacherType=teacherType,
                                current_lesson_name=current_lesson_name,
                                max_lessons=max_lessons,
                                download_url=download_url,
@@ -98,10 +100,10 @@ def index():
     search_range = int(request.form.get('range', 180)) if request.method == 'POST' and 'range' in request.form else 180
 
     if token:
-        class_groups, err = fetch_class_list(token, search_range)
+        class_groups, err = fetch_class_list(token, search_range, teacherType)
         if not err:
             return render_template('index.html', show_class_selector=True, class_groups=class_groups,
-                                   username=username, token=token, search_range=search_range)
+                                   username=username, token=token, search_range=search_range, teacherType=teacherType)
         else:
             # Token 可能过期
             session.clear()
@@ -111,12 +113,13 @@ def index():
     if request.method == 'POST' and 'username' in request.form:
         username = request.form.get('username')
         password = request.form.get('password')
+        teacherType = request.form.get('teacherType', "0")
 
         login_log_tag = f"[LoginAttempt:{username}][IP:{request.remote_addr}]"
         logging.info(f"{login_log_tag} >>> 收到登录请求...")
 
         start_time = time.time()
-        token, error = perform_login(username, password)
+        token, error = perform_login(username, password, teacherType)
         login_duration = time.time() - start_time
 
         if not token:
@@ -130,10 +133,11 @@ def index():
             session.permanent = True
             session['token'] = token
             session['username'] = username
+            session['teacherType'] = teacherType
 
             # 立即获取列表
             start_fetch = time.time()
-            class_groups, err = fetch_class_list(token, search_range)
+            class_groups, err = fetch_class_list(token, search_range, teacherType)
 
             fetch_duration = time.time() - start_fetch
             logging.info(f"{login_log_tag} 获取班级列表成功 (耗时: {fetch_duration:.2f}s)")
@@ -143,7 +147,7 @@ def index():
                 return render_template('login.html', error=err, default_user=username)
 
             return render_template('index.html', show_class_selector=True, class_groups=class_groups,
-                                   username=username, token=token, search_range=search_range)
+                                   username=username, token=token, search_range=search_range, teacherType=teacherType)
 
     # === 默认场景: 显示登录页 ===
     return render_template('login.html')
@@ -166,8 +170,9 @@ def download_csv():
     class_id = request.args.get('classId')
     cuc_num = int(request.args.get('cucNum', 1))
     class_name = request.args.get('className', 'class_stats')
+    teacherType = session.get('teacherType', '0')
 
-    headers, rows, _, _, _, _ = fetch_data(class_id, token, cuc_num)
+    headers, rows, _, _, _, _ = fetch_data(class_id, token, cuc_num, teacherType)
     if not headers: return "Error fetching data"
 
     si = io.StringIO()
@@ -245,6 +250,7 @@ def get_class_roster():
     token = request.args.get('token', '').strip()
     class_id = request.args.get('classId', '').strip()
     mode = request.args.get('mode', 'latest').strip() # 支持 'deep' 或 'latest'
+    teacherType = session.get('teacherType', '0')
 
     if not token or not class_id:
         return jsonify({'error': 'Missing params'}), 400
@@ -283,7 +289,7 @@ def get_class_roster():
         try:
             # 调用 data_loader 中的 fetch_data
             # 注意：现在的 fetch_data 返回 6 个元素的元组
-            result = fetch_data(class_id, token, c_num)
+            result = fetch_data(class_id, token, c_num, teacherType)
 
             # 检查返回值是否有效 (result[0] 是 headers，如果是 None 表示失败)
             if result and result[0] is not None:
@@ -320,6 +326,7 @@ def student_report_data_api():
     student_id = request.args.get('studentId', '').strip()
     class_year = request.args.get('classYear', '').strip()
     class_name = request.args.get('className', '').strip()
+    teacherType = session.get('teacherType', '0')
 
     stats_map = {}
     history = []
@@ -328,7 +335,7 @@ def student_report_data_api():
 
     if student_id:
         history, stats_map = fetch_student_detailed_history_v2(
-            token, class_id, student_name, student_id, class_year, lessons, class_name
+            token, class_id, student_name, student_id, class_year, lessons, class_name, teacherType
         )
 
     return jsonify({'stats': stats_map, 'history': history})

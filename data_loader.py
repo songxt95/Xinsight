@@ -14,9 +14,9 @@ logging.basicConfig(
 )
 
 # ... (perform_login, fetch_class_curriculum, fetch_class_list, fetch_class_detail 保持不变) ...
-def perform_login(username, password):
+def perform_login(username, password, teacherType='0'):
     url = 'https://rest.xiaohoucode.com/api/uc/teachers/login'
-    data = {'username': username, 'password': password, 'cityCode': '010', 'type': '0'}
+    data = {'username': username, 'password': password, 'cityCode': '010', 'type': teacherType}
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
     try:
         response = requests.post(url, json=data, headers=headers, timeout=5)
@@ -40,7 +40,7 @@ def fetch_class_curriculum(token, class_id):
         return lessons
     except: return []
 
-def fetch_class_list(token, search_range=180):
+def fetch_class_list(token, search_range=180, teacherType="0"):
     url = "https://rest.xiaohoucode.com/api/core/teachers/partclasses"
     headers = { "Host": "rest.xiaohoucode.com", "Authorization": token, "User-Agent": "Mozilla/5.0", "Content-Type": "application/json", "Origin": "https://www.xiaohoucode.com" }
     groups = { 'open': [], 'closed': [], 'self': [] }
@@ -51,7 +51,7 @@ def fetch_class_list(token, search_range=180):
 
     try:
         for type_val, group_key, time_range in [(1, 'open', 0), (0, 'closed', search_range)]:
-            payload = {"type": type_val, "range": time_range, "teacherType": "0", "bizType": 10000}
+            payload = {"type": type_val, "range": time_range, "teacherType": teacherType, "bizType": 10000}
             response = requests.post(url, json=payload, headers=headers, timeout=5)
             if response.status_code != 200: continue
 
@@ -157,7 +157,7 @@ def fetch_class_detail(token, class_id):
     return result
 
 # === [v121 修改] 增加深度 Debug 日志 ===
-def fetch_data(class_id, token, cuc_num):
+def fetch_data(class_id, token, cuc_num, teacherType="0"):
     if not cuc_num: cuc_num = 1
 
     # 1. 打印请求信息
@@ -166,7 +166,7 @@ def fetch_data(class_id, token, cuc_num):
     logging.info(f"ClassID: {class_id}, Lesson: {cuc_num}")
     logging.info(f"Token: {masked_token}")
 
-    url = f"https://rest.xiaohoucode.com/api/core/stats/v2/stu/answers?classId={class_id}&cityCode=010&cucNum={cuc_num}&teacherType=0"
+    url = f"https://rest.xiaohoucode.com/api/core/stats/v2/stu/answers?classId={class_id}&cityCode=010&cucNum={cuc_num}&teacherType={teacherType}"
     logging.info(f"URL: {url}")
 
     headers = {"Authorization": token, "User-Agent": "Mozilla/5.0"}
@@ -306,7 +306,7 @@ def fetch_student_classes(token, student_id, year):
         return res.get('data', {}).get('classDtoList', [])
     except: return []
 
-def fetch_student_detailed_history_v2(token, main_class_id, student_name, student_id, year, lessons, target_class_name):
+def fetch_student_detailed_history_v2(token, main_class_id, student_name, student_id, year, lessons, target_class_name, teacherType="0"):
     logging.info(f"Start Aggregation for {student_name} (Year: {year}, Target: {target_class_name})")
 
     found_class_ids = set()
@@ -340,7 +340,7 @@ def fetch_student_detailed_history_v2(token, main_class_id, student_name, studen
 
     def fetch_task(task):
         try:
-            result = fetch_data(task['classId'], token, task['num'])
+            result = fetch_data(task['classId'], token, task['num'], teacherType)
             # [Fix] 检查返回值
             if not result or not result[0]: return None
 
