@@ -37,6 +37,7 @@ exports/
 # === 操作系统生成文件 ===
 .DS_Store
 Thumbs.db
+._*
 
 # === Playwright / 浏览器缓存 ===
 # 虽然 Playwright 浏览器通常在系统目录，但防止本地缓存
