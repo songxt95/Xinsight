@@ -1,0 +1,4 @@
+Flask>=2.0.0
+requests>=2.25.0
+playwright>=1.30.0
+waitress>=2.1.0
