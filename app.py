@@ -17,6 +17,30 @@ from data_loader import (
     fetch_class_detail
 )
 
+# 解析 .env 文件的函数
+def load_env_natively(env_path='.env'):
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # 忽略空行和以 # 开头的注释行
+            if not line or line.startswith('#'):
+                continue
+            # 按第一个等号分割键值对
+            if '=' in line:
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                # 去除两端可能包含的引号 (单引号或双引号)
+                if value.startswith(("'", '"')) and value.endswith(("'", '"')):
+                    value = value[1:-1]
+                # 写入系统环境变量
+                os.environ[key] = value
+
+# 在应用启动前调用此函数加载配置
+load_env_natively()
+
 app = Flask(__name__)
 
 # [安全配置]
