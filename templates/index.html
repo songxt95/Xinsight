@@ -191,9 +191,6 @@
                         <button @click="$dispatch('zoom-in')" class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-md transition" title="放大"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg></button>
                     </div>
                     <form action="/" method="post" class="inline">
-                        <input type="hidden" name="username" value="{{ username }}">
-                        <input type="hidden" name="password" value="{{ password }}">
-                        <input type="hidden" name="token" value="{{ current_token }}">
                         <button type="submit" class="text-sm font-medium text-slate-500 hover:text-indigo-600 transition">返回首页</button>
                     </form>
                     {% endif %}
@@ -220,9 +217,6 @@
                 </div>
                 <div class="flex gap-3">
                     <form method="post" class="flex gap-2">
-                        <input type="hidden" name="username" value="{{ username }}">
-                        <input type="hidden" name="password" value="{{ password }}">
-                        <input type="hidden" name="token" value="{{ token }}">
 
                         <select name="range" onchange="this.form.submit()" class="border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white hover:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition text-slate-600 cursor-pointer">
                             <option value="90" {% if search_range==90 %}selected{% endif %}>近3个月</option>
@@ -257,11 +251,9 @@
                 </div>
                 <div class="flex gap-3">
                     <form action="/" method="post" class="inline">
-                        <input type="hidden" name="token" value="{{ current_token }}">
                         <input type="hidden" name="classId" value="{{ current_class_id }}">
                         <input type="hidden" name="cucNum" value="{{ current_cuc_num }}">
                         <input type="hidden" name="username" value="{{ username }}">
-                        <input type="hidden" name="password" value="{{ password }}">
                         <input type="hidden" name="className" value="{{ current_class_name }}">
                         <input type="hidden" name="classYear" value="{{ current_class_year }}">
 
@@ -298,10 +290,8 @@
                         <div class="flex items-center bg-white border border-slate-200 rounded-md overflow-hidden shadow-sm">
 
                             <form action="/" method="post" class="inline">
-                                <input type="hidden" name="token" value="{{ current_token }}">
                                 <input type="hidden" name="classId" value="{{ current_class_id }}">
                                 <input type="hidden" name="username" value="{{ username }}">
-                                <input type="hidden" name="password" value="{{ password }}">
                                 <input type="hidden" name="cucNum" value="{{ current_cuc_num - 1 }}">
                                 <input type="hidden" name="className" value="{{ current_class_name }}">
                                 <input type="hidden" name="classYear" value="{{ current_class_year }}">
@@ -314,10 +304,8 @@
                             <span class="px-3 py-1 text-xs font-bold text-indigo-600 border-x border-slate-100 bg-slate-50">第 {{ current_cuc_num }} 讲</span>
 
                             <form action="/" method="post" class="inline">
-                                <input type="hidden" name="token" value="{{ current_token }}">
                                 <input type="hidden" name="classId" value="{{ current_class_id }}">
                                 <input type="hidden" name="username" value="{{ username }}">
-                                <input type="hidden" name="password" value="{{ password }}">
                                 <input type="hidden" name="cucNum" value="{{ current_cuc_num + 1 }}">
                                 <input type="hidden" name="className" value="{{ current_class_name }}">
                                 <input type="hidden" name="classYear" value="{{ current_class_year }}">
@@ -358,7 +346,7 @@
                                         <div class="flex items-center h-full justify-between gap-1">
                                             <div class="h-6 w-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold shrink-0"><span x-text="row.name.charAt(0)"></span></div>
 
-                                            <a :href="`/report/student?classId={{ current_class_id }}&className=` + encodeURIComponent('{{ current_class_name }}') + `&classYear={{ current_class_year }}` + `&studentName=` + encodeURIComponent(row.name) + `&studentId=` + (row.studentId || '') + `&token={{ current_token }}`"
+                                            <a :href="`/report/student?classId={{ current_class_id }}&className=` + encodeURIComponent('{{ current_class_name }}') + `&classYear={{ current_class_year }}` + `&studentName=` + encodeURIComponent(row.name) + `&studentId=` + (row.studentId || '')"
                                                target="_blank"
                                                class="w-full text-left truncate text-xs font-bold text-slate-700 hover:text-indigo-600 hover:underline cursor-pointer"
                                                title="点击查看该生完整学情报告"

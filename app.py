@@ -159,14 +159,14 @@ def logout():
 
 @app.route('/api/get_curriculum')
 def get_curriculum():
-    token = request.args.get('token')
+    token = session.get('token')
     class_id = request.args.get('classId')
     lessons = fetch_class_curriculum(token, class_id)
     return jsonify({'lessons': lessons})
 
 @app.route('/download')
 def download_csv():
-    token = request.args.get('token')
+    token = session.get('token')
     class_id = request.args.get('classId')
     cuc_num = int(request.args.get('cucNum', 1))
     class_name = request.args.get('className', 'class_stats')
@@ -231,7 +231,7 @@ def export_backend_image():
 
 @app.route('/report/student')
 def student_report_view():
-    token = request.args.get('token', '').strip()
+    token = session.get('token')
     class_id = request.args.get('classId', '').strip()
     student_name = request.args.get('studentName', '').strip()
     student_id = request.args.get('studentId', '').strip()
@@ -247,7 +247,7 @@ def student_report_view():
 
 @app.route('/api/get_class_roster')
 def get_class_roster():
-    token = request.args.get('token', '').strip()
+    token = session.get('token')
     class_id = request.args.get('classId', '').strip()
     mode = request.args.get('mode', 'latest').strip() # 支持 'deep' 或 'latest'
     teacherType = session.get('teacherType', '0')
@@ -320,7 +320,7 @@ def get_class_roster():
 
 @app.route('/api/report/student/data')
 def student_report_data_api():
-    token = request.args.get('token', '').strip()
+    token = session.get('token')
     class_id = request.args.get('classId', '').strip()
     student_name = request.args.get('studentName', '').strip()
     student_id = request.args.get('studentId', '').strip()

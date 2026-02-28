@@ -32,7 +32,6 @@
                 history: [],
                 chartInstance: null,
                 params: {
-                    token: '{{ params.token }}',
                     classId: '{{ params.classId }}',
                     studentName: '{{ params.studentName }}',
                     studentId: '{{ params.studentId }}',
@@ -318,7 +317,7 @@
                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
                             </div>
                             <span class="px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-xs font-mono font-bold" x-text="'第 ' + item.num + ' 讲'"></span>
-                            <a :href="`/?token=${params.token}&classId=${params.classId}&cucNum=${item.num}&username=USER&password=PASS&className=${encodeURIComponent(params.className)}&classYear=${params.classYear}`"
+                            <a :href="`/?classId=${params.classId}&cucNum=${item.num}&username=USER&password=PASS&className=${encodeURIComponent(params.className)}&classYear=${params.classYear}`"
                                target="_blank"
                                @click.stop
                                class="font-bold text-slate-700 hover:text-indigo-600 transition flex items-center gap-1 group">
