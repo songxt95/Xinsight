@@ -347,10 +347,17 @@
                                             <div class="h-6 w-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold shrink-0"><span x-text="row.name.charAt(0)"></span></div>
 
                                             <a :href="`/report/student?classId={{ current_class_id }}&className=` + encodeURIComponent('{{ current_class_name }}') + `&classYear={{ current_class_year }}` + `&studentName=` + encodeURIComponent(row.name) + `&studentId=` + (row.studentId || '')"
-                                               target="_blank"
-                                               class="w-full text-left truncate text-xs font-bold text-slate-700 hover:text-indigo-600 hover:underline cursor-pointer"
-                                               title="点击查看该生完整学情报告"
-                                               x-text="row.name">
+                                                target="_blank"
+                                                class="w-full text-left flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-indigo-600 cursor-pointer overflow-hidden"
+                                                title="点击查看该生完整学情报告">
+                                                    
+                                                <span x-text="row.name" class="truncate hover:underline"></span>
+                                                
+                                                <svg x-cloak x-show="computedProgress(row).percent === 100" 
+                                                    xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" 
+                                                    class="w-3.5 h-3.5 text-amber-400 shrink-0" title="满分通关">
+                                                    <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/>
+                                                </svg>
                                             </a>
 
                                             <button @click="hideRow(row.name)" class="text-slate-300 hover:text-red-500 opacity-0 group-hover/cell:opacity-100 transition px-1 shrink-0" title="隐藏此行"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg></button>
