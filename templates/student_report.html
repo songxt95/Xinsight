@@ -151,6 +151,51 @@
                     });
                 },
 
+                exportAsCSV() {
+                    // \uFEFF 是 BOM 头，防止用 Excel 打开时中文出现乱码
+                    let csvContent = "\uFEFF"; 
+                    
+                    // 1. 写入顶部的汇总数据
+                    csvContent += `学生姓名,{{ student_name }}\n`;
+                    csvContent += `班级,"${this.params.className.replace(/"/g, '""')}"\n`;
+                    csvContent += `待作答,${this.stats['0'] || 0}\n`;
+                    csvContent += `未满分,${this.stats['1'] || 0}\n`;
+                    csvContent += `已通过,${this.stats['2'] || 0}\n\n`;
+                    
+                    // 2. 写入明细表头
+                    csvContent += "讲次,课程名称,完成进度,题目名称,得分/状态\n";
+
+                    // 3. 遍历历史数据，把每道题拆成一行
+                    this.history.forEach(item => {
+                        let safeName = `"${(item.name || '').toString().replace(/"/g, '""')}"`;
+                        let safeProgress = `="${(item.progress_text || '').toString().replace(/"/g, '""')}"`;
+                        
+                        if (item.headers && item.headers.length > 0) {
+                            item.headers.forEach((header, idx) => {
+                                let score = item.scores[idx] || "";
+                                let safeHeader = `"${header.toString().replace(/"/g, '""')}"`;
+                                let safeScore = `"${score.toString().replace(/"/g, '""')}"`;
+                                csvContent += `第${item.num}讲,${safeName},${safeProgress},${safeHeader},${safeScore}\n`;
+                            });
+                        } else {
+                            // 如果该讲没有题目数据
+                            csvContent += `第${item.num}讲,${safeName},${safeProgress},无题目数据,-\n`;
+                        }
+                    });
+
+                    // 4. 生成 Blob 对象并触发浏览器下载
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `{{ student_name }}_${this.params.className}_学情明细.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                },
+
                 getScoreClass(score) {
                     if (score === '100' || score === '答题正确' || score === '已订正') return 'bg-perfect';
                     if (!score || score === '未打开' || score === '-' || score === '') return 'bg-none';
@@ -219,6 +264,13 @@
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
                     </template>
                     <span x-text="isAllExpanded ? '折叠全部' : '展开全部'"></span>
+                </button>
+
+                <button @click="exportAsCSV()" class="text-sm text-emerald-600 hover:text-emerald-700 transition flex items-center gap-1 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg shadow-sm hover:shadow active:scale-95">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    导出CSV
                 </button>
 
                 <button @click="exportAsImage()" :disabled="isExporting" class="text-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-wait transition flex items-center gap-1 border border-transparent px-3 py-1.5 rounded-lg shadow-sm hover:shadow active:scale-95">
