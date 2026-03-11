@@ -71,6 +71,48 @@
                       this.rosterLoading = false;
                       if(mode === "deep") this.isDeepScanning = false;
                   });
+          },
+
+          export_all_csv(){
+            this.roster.forEach(stu => {
+                fetch(`api/report/student/data?classId={{ cls.id }}&studentName=${encodeURIComponent(stu.name)}&studentId=${stu.id || ""}&classYear={{ cls.year }}&className=` + encodeURIComponent("{{ cls.name }}"))
+                    .then(res => res.json())
+                    .then(data => {
+                        let csvContent = "\uFEFF"; 
+                        csvContent += `班级,"{{cls.name}}"\n`;
+                        csvContent += `学生姓名,${stu.name}\n`;
+
+                        if (data.history) {
+                            data.history.forEach(item => {
+                                csvContent += item.name + ",";
+                                if (item.headers && item.headers.length > 0) {
+                                    item.headers.forEach((header, idx) => {
+                                        csvContent += `${header},`;
+                                    });
+                                    csvContent += "\n,";
+                                    item.headers.forEach((header, idx) => {
+                                        let score = item.scores[idx] || "";
+                                        csvContent += `${score},`;
+                                    });
+                                    csvContent += "\n";
+                                }
+                                else{
+                                    csvContent += "\n";
+                                }
+                            });
+                        }
+
+                        // 触发下载
+                        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement("a");
+                        link.setAttribute("href", url);
+                        link.setAttribute("download", `{{cls.name}}_${stu.name}_report.csv`);
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    });
+            });
           }
       }'>
 
@@ -175,6 +217,12 @@
                     <button type="button" @click="scanDeep()" class="text-[10px] flex items-center gap-1 text-slate-400 hover:text-indigo-500 transition">
                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         名单不全？点击扫描所有已结课讲次
+                    </button>
+                </div>
+                    <div x-show="rosterLoaded" class="mt-3 pt-2 border-t border-slate-50 flex items-center">
+                    <button type="button" @click="export_all_csv()" class="text-[10px] flex items-center gap-1 text-slate-400 hover:text-indigo-500 transition">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        导出所有学生数据
                     </button>
                 </div>
             </div>
