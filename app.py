@@ -48,6 +48,27 @@ app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 # 设置 Session 有效期为 30 天，模拟“自动登录”体验，但数据存在客户端
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
+
+def resolve_export_browser_executable():
+    """优先使用环境变量，其次回退到系统已安装浏览器路径。"""
+    candidates = []
+
+    env_path = os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE', '').strip()
+    if env_path:
+        candidates.append(env_path)
+
+    candidates.extend([
+        'C:/Program Files/Google/Chrome/Application/chrome.exe',
+        'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+        'C:/Program Files/Microsoft/Edge/Application/msedge.exe'
+    ])
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     # [关键修改] 从 Session 获取当前用户的 Token，实现多人隔离
@@ -56,9 +77,6 @@ def index():
     username = session.get('username', '')
 
     # 辅助参数 (单讲看板用)
-    req_token = request.values.get('token') # 某些URL可能还带token
-    if req_token: token = req_token         # 优先使用URL里的
-
     class_id = request.values.get('classId')
     cuc_num_str = request.values.get('cucNum')
     class_name = request.values.get('className', '').strip()
@@ -93,7 +111,7 @@ def index():
              session.clear() # Token失效，清理Session
              return render_template('login.html', error=stats.get('error'), default_user=username)
 
-        download_url = url_for('download_csv', token=token, classId=class_id, cucNum=cuc_num, className=class_name)
+        download_url = url_for('download_csv', classId=class_id, cucNum=cuc_num, className=class_name)
 
         return render_template('index.html', show_dashboard=True,
                                headers=headers,
@@ -106,7 +124,6 @@ def index():
                                current_class_id=class_id,
                                current_class_name=class_name,
                                current_class_year=class_year,
-                               current_token=token,
                                username=username,
                                password="***", # 密码不再透传到前端
                                teacherType=teacherType,
@@ -127,7 +144,7 @@ def index():
         class_groups, err = fetch_class_list(token, search_range, teacherType)
         if not err:
             return render_template('index.html', show_class_selector=True, class_groups=class_groups,
-                                   username=username, token=token, search_range=search_range, teacherType=teacherType)
+                                   username=username, search_range=search_range, teacherType=teacherType)
         else:
             # Token 可能过期
             session.clear()
@@ -171,7 +188,7 @@ def index():
                 return render_template('login.html', error=err, default_user=username)
 
             return render_template('index.html', show_class_selector=True, class_groups=class_groups,
-                                   username=username, token=token, search_range=search_range, teacherType=teacherType)
+                                   username=username, search_range=search_range, teacherType=teacherType)
 
     # === 默认场景: 显示登录页 ===
     return render_template('login.html')
@@ -229,7 +246,12 @@ def export_backend_image():
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser_launch_kwargs = {'headless': True}
+            executable_path = resolve_export_browser_executable()
+            if executable_path:
+                browser_launch_kwargs['executable_path'] = executable_path
+
+            browser = p.chromium.launch(**browser_launch_kwargs)
             try: viewport_width = int(float(width_param))
             except: viewport_width = 1920
 
@@ -240,8 +262,7 @@ def export_backend_image():
             page.add_style_tag(content=f"""
                 nav, button, .no-print {{ display: none !important; }}
                 body {{ background-color: white !important; overflow: hidden !important; }}
-                main {{ zoom: {zoom_param} !important; transform-origin: top left !important; }}
-                #capture-area {{ box-shadow: none !important; border: none !important; margin: 0 auto !important; max-width: none !important; width: 100% !important; }}
+                #capture-area {{ zoom: {zoom_param} !important; transform-origin: top left !important; box-shadow: none !important; border: none !important; margin: 0 auto !important; max-width: none !important; width: 100% !important; }}
             """)
 
             locator = page.locator(selector)
@@ -267,7 +288,7 @@ def student_report_view():
 
     return render_template('student_report.html',
                            student_name=student_name,
-                           params={ 'token': token, 'classId': class_id, 'studentId': student_id, 'studentName': student_name, 'classYear': class_year, 'className': class_name })
+                           params={ 'classId': class_id, 'studentId': student_id, 'studentName': student_name, 'classYear': class_year, 'className': class_name })
 
 @app.route('/api/get_class_roster')
 def get_class_roster():
