@@ -86,14 +86,201 @@
         const rawOrders = {{ orders_json | safe }};
         const rawCategories = {{ cats_json | safe }};
 
+        const DASHBOARD_ZOOM_STORAGE_KEY = 'xh_dashboard_zoom_level';
+        const DASHBOARD_ZOOM_MODE_KEY = 'xh_dashboard_zoom_mode';
+
+        function getSavedDashboardZoom(defaultZoom = 1.0) {
+            try {
+                const savedZoom = parseFloat(localStorage.getItem(DASHBOARD_ZOOM_STORAGE_KEY));
+                return Number.isFinite(savedZoom) ? savedZoom : defaultZoom;
+            } catch (_) {
+                return defaultZoom;
+            }
+        }
+        function saveDashboardZoom(value) {
+            try {
+                localStorage.setItem(DASHBOARD_ZOOM_STORAGE_KEY, String(value));
+            } catch (_) {}
+        }
+        function getSavedZoomMode() {
+            try {
+                return localStorage.getItem(DASHBOARD_ZOOM_MODE_KEY) || 'auto';
+            } catch (_) {
+                return 'auto';
+            }
+        }
+        function saveZoomMode(mode) {
+            try {
+                localStorage.setItem(DASHBOARD_ZOOM_MODE_KEY, mode);
+            } catch (_) {}
+        }
+
         function tableDataComponent() {
             return {
                 rows: rawData, colNames: rawCols, colOrders: rawOrders, colCategories: rawCategories,
                 hiddenCols: [], tempHiddenCols: [], hiddenNames: [], sortCol: 'progress', sortAsc: false, sortLabel: '完成进度 (高→低)', isExporting: false, zoomLevel: 1.0, showProgressCol: true,
+                zoomMin: 0.3, zoomMax: 2.5, zoomMode: getSavedZoomMode(),
+                lastClickedIndex: null, shiftHoverIndex: null,
 
-                init() { window.addEventListener('zoom-in', () => { if(this.zoomLevel < 2.5) this.zoomLevel += 0.1; }); window.addEventListener('zoom-out', () => { if(this.zoomLevel > 0.5) this.zoomLevel -= 0.1; }); },
-                initDropdown() { this.tempHiddenCols = [...this.hiddenCols]; },
-                toggleTempCol(index) { if (this.tempHiddenCols.includes(index)) this.tempHiddenCols = this.tempHiddenCols.filter(i => i !== index); else this.tempHiddenCols.push(index); },
+                init() {
+                    // 自动模式：计算表格宽度后自适应
+                    if (this.zoomMode === 'auto') {
+                        this.autoFitZoom();
+                    } else {
+                        this.zoomLevel = this.clampZoom(getSavedDashboardZoom(1.0));
+                    }
+
+                    // 同步初始值到 window，供工具栏读取
+                    window.__currentZoomPct = Math.round(this.zoomLevel * 100);
+                    window.__currentZoomMode = this.zoomMode;
+
+                    this.$watch('zoomLevel', (value) => {
+                        saveDashboardZoom(this.clampZoom(value));
+                        const pct = Math.round(value * 100);
+                        window.__currentZoomPct = pct;
+                        // 通知工具栏显示当前百分比
+                        window.dispatchEvent(new CustomEvent('zoom-changed', { detail: pct }));
+                    });
+                    this.$watch('hiddenCols', () => {
+                        if (this.zoomMode === 'auto') {
+                            this.autoFitZoom();
+                        }
+                    });
+                    this.$watch('showProgressCol', () => {
+                        if (this.zoomMode === 'auto') {
+                            this.autoFitZoom();
+                        }
+                    });
+                    window.addEventListener('zoom-in', () => this.adjustZoom(0.1));
+                    window.addEventListener('zoom-out', () => this.adjustZoom(-0.1));
+                    window.addEventListener('reset-zoom', () => this.resetToAuto());
+                    window.addEventListener('set-zoom', (e) => this.setZoomFromPercent(e.detail));
+                    window.addEventListener('resize', () => {
+                        if (this.zoomMode === 'auto') this.autoFitZoom();
+                    });
+                    // 初始化时同步百分比到顶栏（多次延迟确保工具栏 Alpine 组件已完全初始化并绑定事件监听）
+                    const syncToToolbar = () => {
+                        window.dispatchEvent(new CustomEvent('zoom-changed', { detail: Math.round(this.zoomLevel * 100) }));
+                        window.dispatchEvent(new CustomEvent('zoom-mode-changed', { detail: this.zoomMode }));
+                    };
+                    requestAnimationFrame(syncToToolbar);
+                    setTimeout(syncToToolbar, 50);
+                },
+                autoFitZoom() {
+                    // 根据可见列数直接计算缩放倍率，不依赖 DOM 测量
+                    const NAME_COL_W = 144;       // 姓名列 w-36 = 144px
+                    const PROGRESS_COL_W = 96;    // 进度列 w-24 = 96px
+                    const SCORE_COL_W = 64;       // 每个分数列 ~64px（适合显示分数状态）
+                    const PADDING = 48;           // 两侧 px-4 边距
+
+                    const visibleScoreCols = this.colNames.filter((_, i) => !this.hiddenCols.includes(i)).length;
+                    let tableWidth = NAME_COL_W;
+                    if (this.showProgressCol) tableWidth += PROGRESS_COL_W;
+                    tableWidth += visibleScoreCols * SCORE_COL_W;
+
+                    const viewportWidth = window.innerWidth;
+                    if (viewportWidth <= 0) return;
+
+                    const targetWidth = viewportWidth - PADDING;
+                    let autoZoom = targetWidth / tableWidth;
+                    // 自适应上限 1.5（150%），下限 0.7（70%）
+                    autoZoom = Math.min(1.5, Math.max(0.7, autoZoom));
+                    autoZoom = Math.round(autoZoom * 100) / 100;
+                    this.zoomLevel = autoZoom;
+                },
+                resetToAuto() {
+                    this.zoomMode = 'auto';
+                    saveZoomMode('auto');
+                    window.__currentZoomMode = 'auto';
+                    window.dispatchEvent(new CustomEvent('zoom-mode-changed', { detail: 'auto' }));
+                    this.autoFitZoom();
+                },
+                clampZoom(value) {
+                    const rounded = Math.round(Number(value || 1) * 100) / 100;
+                    return Math.max(this.zoomMin, Math.min(this.zoomMax, rounded));
+                },
+                adjustZoom(delta) {
+                    const next = this.clampZoom(this.zoomLevel + delta);
+                    if (next !== this.zoomLevel) {
+                        this.zoomLevel = next;
+                        // 手动调整切换为手动模式
+                        this.zoomMode = 'manual';
+                        saveZoomMode('manual');
+                        window.__currentZoomMode = 'manual';
+                        window.dispatchEvent(new CustomEvent('zoom-mode-changed', { detail: 'manual' }));
+                    }
+                },
+                setZoomFromPercent(pct) {
+                    const value = this.clampZoom(pct / 100);
+                    if (value !== this.zoomLevel) {
+                        this.zoomLevel = value;
+                        this.zoomMode = 'manual';
+                        saveZoomMode('manual');
+                        window.__currentZoomMode = 'manual';
+                        window.dispatchEvent(new CustomEvent('zoom-mode-changed', { detail: 'manual' }));
+                    }
+                },
+                initDropdown() { this.tempHiddenCols = [...this.hiddenCols]; this.lastClickedIndex = null; this.shiftHoverIndex = null; },
+                toggleTempCol(index, shiftKey) {
+                    if (shiftKey && this.lastClickedIndex !== null) {
+                        // Shift 连续选择：从上次点击位置到当前位置
+                        const start = Math.min(this.lastClickedIndex, index);
+                        const end = Math.max(this.lastClickedIndex, index);
+                        // 以当前点击项的状态为准，统一应用到区间内所有项
+                        const shouldShow = this.tempHiddenCols.includes(index);
+                        for (let i = start; i <= end; i++) {
+                            if (shouldShow) {
+                                this.tempHiddenCols = this.tempHiddenCols.filter(j => j !== i);
+                            } else {
+                                if (!this.tempHiddenCols.includes(i)) this.tempHiddenCols.push(i);
+                            }
+                        }
+                    } else {
+                        if (this.tempHiddenCols.includes(index)) this.tempHiddenCols = this.tempHiddenCols.filter(i => i !== index);
+                        else this.tempHiddenCols.push(index);
+                    }
+                    this.lastClickedIndex = index;
+                },
+                isInShiftRange(index) {
+                    if (this.lastClickedIndex === null || this.shiftHoverIndex === null) return false;
+                    const start = Math.min(this.lastClickedIndex, this.shiftHoverIndex);
+                    const end = Math.max(this.lastClickedIndex, this.shiftHoverIndex);
+                    return index >= start && index <= end;
+                },
+                selectAllTempCols() { this.tempHiddenCols = []; this.lastClickedIndex = null; },
+                deselectAllTempCols() { this.tempHiddenCols = this.colNames.map((_, i) => i); this.lastClickedIndex = null; },
+                selectTempColsByCategory(cat) {
+                    for (let i = 0; i < this.colCategories.length; i++) {
+                        if (this.colCategories[i] === cat) {
+                            this.tempHiddenCols = this.tempHiddenCols.filter(j => j !== i);
+                        }
+                    }
+                    this.lastClickedIndex = null;
+                },
+                deselectTempColsByCategory(cat) {
+                    for (let i = 0; i < this.colCategories.length; i++) {
+                        if (this.colCategories[i] === cat && !this.tempHiddenCols.includes(i)) {
+                            this.tempHiddenCols.push(i);
+                        }
+                    }
+                    this.lastClickedIndex = null;
+                },
+                toggleCategoryTempCols(cat) {
+                    const catIndices = [];
+                    for (let i = 0; i < this.colCategories.length; i++) {
+                        if (this.colCategories[i] === cat) catIndices.push(i);
+                    }
+                    const hasHidden = catIndices.some(i => this.tempHiddenCols.includes(i));
+                    if (hasHidden) {
+                        this.selectTempColsByCategory(cat);
+                    } else {
+                        this.deselectTempColsByCategory(cat);
+                    }
+                    this.lastClickedIndex = null;
+                },
+                get tempVisibleCount() { return this.colNames.length - this.tempHiddenCols.length; },
+                get tempAllSelected() { return this.tempHiddenCols.length === 0; },
+                get tempNoneSelected() { return this.tempHiddenCols.length === this.colNames.length; },
                 applyColumns() { this.hiddenCols = [...this.tempHiddenCols]; },
                 hideRow(name) { if (!this.hiddenNames.includes(name)) this.hiddenNames.push(name); },
                 isPerfect(val) { return val === '100' || val === '答题正确' || val === '已订正'; },
@@ -185,11 +372,6 @@
                 </div>
                 <div class="flex items-center gap-4" x-data>
                     {% if show_dashboard %}
-                    <div class="flex items-center bg-slate-100 rounded-lg p-1">
-                        <button @click="$dispatch('zoom-out')" class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-md transition" title="缩小"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></button>
-                        <span class="text-xs font-mono text-slate-500 w-12 text-center select-none">缩放</span>
-                        <button @click="$dispatch('zoom-in')" class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-md transition" title="放大"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg></button>
-                    </div>
                     <form action="/" method="post" class="inline">
                         <button type="submit" class="text-sm font-medium text-slate-500 hover:text-indigo-600 transition">返回首页</button>
                     </form>
@@ -199,8 +381,8 @@
         </div>
     </nav>
 
-    <main class="w-full px-4 py-8 origin-top-left transition-transform duration-200 ease-out"
-          x-data="tableDataComponent()" x-cloak :style="'zoom: ' + zoomLevel">
+    <main class="w-full px-4 py-8"
+          x-data="tableDataComponent()" x-cloak>
 
         {% if show_class_selector %}
         <div class="max-w-6xl mx-auto mt-4 flex flex-col gap-6">
@@ -263,6 +445,14 @@
                         </button>
                     </form>
 
+                    <div class="inline-flex items-center bg-white border border-slate-200 rounded-lg shadow-sm h-10 px-1 gap-0.5" x-data="{ zoomPct: window.__currentZoomPct != null ? window.__currentZoomPct : '-', isAuto: window.__currentZoomMode === 'auto' }" @zoom-changed.window="zoomPct = $event.detail" @zoom-mode-changed.window="isAuto = ($event.detail === 'auto')">
+                        <button @click="$dispatch('zoom-out')" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded-md transition" title="缩小"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></button>
+                        <input type="text" :value="zoomPct" @input="zoomPct = Number($event.target.value)" @keydown.enter="$dispatch('set-zoom', zoomPct); $el.blur()" @blur="$dispatch('set-zoom', zoomPct)" class="w-8 text-xs font-mono text-center bg-transparent outline-none text-slate-700" title="输入缩放百分比">
+                        <span class="text-xs text-slate-400 mr-0.5">%</span>
+                        <button @click="$dispatch('zoom-in')" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded-md transition" title="放大"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg></button>
+                        <button @click="$dispatch('reset-zoom')" class="px-2 py-1 text-xs rounded-md transition font-medium" :class="isAuto ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-50'" title="自适应缩放">自适应</button>
+                    </div>
+
                     <button @click="exportAsImage()" :disabled="isExporting" class="inline-flex items-center px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg shadow-sm transition active:scale-95 w-40 justify-center h-10">
                         <span x-show="!isExporting" class="flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
@@ -277,47 +467,48 @@
                 </div>
             </div>
 
-            <div id="capture-area" class="bg-white shadow-lg rounded-xl border border-slate-200 mb-8">
+            <div class="px-6 py-4 bg-slate-50/50 flex justify-between items-center no-print rounded-t-xl border border-slate-200 border-b-0">
+
+                <div class="flex items-center gap-4">
+                    <h3 class="font-bold text-slate-700">成绩详情</h3>
+                    <div class="flex items-center bg-white border border-slate-200 rounded-md overflow-hidden shadow-sm">
+
+                        <form action="/" method="post" class="inline">
+                            <input type="hidden" name="classId" value="{{ current_class_id }}">
+                            <input type="hidden" name="username" value="{{ username }}">
+                            <input type="hidden" name="cucNum" value="{{ current_cuc_num - 1 }}">
+                            <input type="hidden" name="className" value="{{ current_class_name }}">
+                            <input type="hidden" name="classYear" value="{{ current_class_year }}">
+
+                            <button type="submit" class="px-2 py-1 hover:bg-slate-50 text-slate-500 disabled:opacity-30 disabled:hover:bg-white" {% if current_cuc_num <= 1 %}disabled{% endif %}>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                            </button>
+                        </form>
+
+                        <span class="px-3 py-1 text-xs font-bold text-indigo-600 border-x border-slate-100 bg-slate-50">第 {{ current_cuc_num }} 讲</span>
+
+                        <form action="/" method="post" class="inline">
+                            <input type="hidden" name="classId" value="{{ current_class_id }}">
+                            <input type="hidden" name="username" value="{{ username }}">
+                            <input type="hidden" name="cucNum" value="{{ current_cuc_num + 1 }}">
+                            <input type="hidden" name="className" value="{{ current_class_name }}">
+                            <input type="hidden" name="classYear" value="{{ current_class_year }}">
+
+                            <button type="submit" class="px-2 py-1 hover:bg-slate-50 text-slate-500 disabled:opacity-30 disabled:hover:bg-white" {% if current_cuc_num >= max_lessons %}disabled{% endif %}>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                            </button>
+                        </form>
+                    </div>
+                    <div class="text-xs text-slate-400 ml-2">排序: <span x-text="sortLabel" class="font-mono text-indigo-600 font-medium"></span></div>
+                </div>
+                <div class="relative" x-data="{ open: false }" @click.outside="open = false"><button @click="open = !open; initDropdown()" class="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded text-slate-700 bg-white hover:bg-slate-50">显示设置</button><div x-show="open" x-transition class="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-2xl ring-1 ring-black ring-opacity-5 z-50 p-4 border border-slate-100"><div class="mb-4 pb-4 border-b border-slate-100"><p class="text-xs font-semibold text-slate-500 mb-2">列设置</p><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded mb-2 border-b border-slate-50 pb-2"><input type="checkbox" name="toggle_progress_col" x-model="showProgressCol" class="rounded border-slate-300 text-indigo-600 mr-2"><span class="font-bold">显示"进度"列</span></label><p class="text-xs font-semibold text-slate-500 mb-2">已隐藏: <span x-text="hiddenNames.length"></span></p><button @click="hiddenNames = []" class="w-full text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 rounded mb-4">恢复隐藏</button><div class="flex items-center justify-between mb-2"><p class="text-xs font-semibold text-slate-500">题目显示 <span class="font-normal text-slate-400" x-text="'(' + tempVisibleCount + '/' + colNames.length + ')'"></span></p><div class="flex gap-1"><button @click="selectAllTempCols()" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition" :class="{'opacity-40 cursor-not-allowed': tempAllSelected}" :disabled="tempAllSelected">全选</button><button @click="deselectAllTempCols()" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition" :class="{'opacity-40 cursor-not-allowed': tempNoneSelected}" :disabled="tempNoneSelected">全不选</button><button @click="tempHiddenCols = [...hiddenCols]" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition">重置</button></div></div><template x-if="colCategories.length > 0"><div class="flex flex-wrap gap-1 mb-2"><template x-for="cat in [...new Set(colCategories)]" :key="cat"><button @click="toggleCategoryTempCols(cat)" class="text-[10px] px-2 py-0.5 rounded-full border transition font-medium" :class="cat === '课堂' ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : cat === '课后' ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100' : cat === '考试' ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'" x-text="cat"></button></template></div></template><div class="max-h-60 overflow-y-auto space-y-0.5 mb-2 border border-slate-100 rounded p-1" @mouseleave="shiftHoverIndex = null"><template x-for="(col, index) in colNames" :key="index"><label @click.prevent="toggleTempCol(index, $event.shiftKey)" @mousemove.shift="shiftHoverIndex = index" @mouseleave="shiftHoverIndex = null" class="flex items-center text-xs cursor-pointer hover:bg-slate-50 p-1.5 rounded transition-colors select-none" :class="[tempHiddenCols.includes(index) ? 'text-slate-400' : 'text-slate-700', lastClickedIndex === index ? 'ring-2 ring-indigo-400 ring-offset-1 bg-indigo-50' : '', isInShiftRange(index) && lastClickedIndex !== index ? 'bg-indigo-50/60' : '']"><input type="checkbox" name="toggle_col_visibility" :checked="!tempHiddenCols.includes(index)" tabindex="-1" class="rounded border-slate-300 text-indigo-600 mr-2 flex-shrink-0 pointer-events-none"><span class="cat-dot flex-shrink-0" :class="getDotClass(colCategories[index])"></span><span x-text="col" class="truncate flex-1"></span></label></template></div><p class="text-[10px] text-slate-400 mb-3 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Shift+点击连续选择，蓝框为锚点，悬浮时预览范围</p><button @click="applyColumns(); open = false" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded transition">确认</button></div></div></div>
+            </div>
+
+            <div id="capture-area" class="bg-white shadow-lg rounded-b-xl border border-t-0 border-slate-200 mb-8 origin-top-left transition-transform duration-200 ease-out" :style="'zoom: ' + zoomLevel">
                 <div class="pt-6 pb-2 px-6 bg-white flex justify-center items-center" id="capture-header">
                     <div class="relative group w-full max-w-2xl">
                         <input type="text" id="lesson-title-input" value="{{ current_lesson_name }}" class="w-full text-2xl font-bold text-center text-slate-800 bg-transparent border border-transparent rounded px-2 py-1 outline-none focus:border-indigo-300 focus:bg-slate-50 transition" title="点击可编辑标题">
                     </div>
-                </div>
-
-                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
-                    <div class="flex items-center gap-4">
-                        <h3 class="font-bold text-slate-700">成绩详情</h3>
-                        <div class="flex items-center bg-white border border-slate-200 rounded-md overflow-hidden shadow-sm">
-
-                            <form action="/" method="post" class="inline">
-                                <input type="hidden" name="classId" value="{{ current_class_id }}">
-                                <input type="hidden" name="username" value="{{ username }}">
-                                <input type="hidden" name="cucNum" value="{{ current_cuc_num - 1 }}">
-                                <input type="hidden" name="className" value="{{ current_class_name }}">
-                                <input type="hidden" name="classYear" value="{{ current_class_year }}">
-
-                                <button type="submit" class="px-2 py-1 hover:bg-slate-50 text-slate-500 disabled:opacity-30 disabled:hover:bg-white" {% if current_cuc_num <= 1 %}disabled{% endif %}>
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
-                                </button>
-                            </form>
-
-                            <span class="px-3 py-1 text-xs font-bold text-indigo-600 border-x border-slate-100 bg-slate-50">第 {{ current_cuc_num }} 讲</span>
-
-                            <form action="/" method="post" class="inline">
-                                <input type="hidden" name="classId" value="{{ current_class_id }}">
-                                <input type="hidden" name="username" value="{{ username }}">
-                                <input type="hidden" name="cucNum" value="{{ current_cuc_num + 1 }}">
-                                <input type="hidden" name="className" value="{{ current_class_name }}">
-                                <input type="hidden" name="classYear" value="{{ current_class_year }}">
-
-                                <button type="submit" class="px-2 py-1 hover:bg-slate-50 text-slate-500 disabled:opacity-30 disabled:hover:bg-white" {% if current_cuc_num >= max_lessons %}disabled{% endif %}>
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
-                                </button>
-                            </form>
-                        </div>
-                        <div class="text-xs text-slate-400 ml-2">排序: <span x-text="sortLabel" class="font-mono text-indigo-600 font-medium"></span></div>
-                    </div>
-                    <div class="relative" x-data="{ open: false }" @click.outside="open = false"><button @click="open = !open; initDropdown()" class="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded text-slate-700 bg-white hover:bg-slate-50">显示设置</button><div x-show="open" class="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-2xl ring-1 ring-black ring-opacity-5 z-50 p-4 border border-slate-100"><div class="mb-4 pb-4 border-b border-slate-100"><p class="text-xs font-semibold text-slate-500 mb-2">列设置</p><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded mb-2 border-b border-slate-50 pb-2"><input type="checkbox" name="toggle_progress_col" x-model="showProgressCol" class="rounded border-slate-300 text-indigo-600 mr-2"><span class="font-bold">显示“进度”列</span></label><p class="text-xs font-semibold text-slate-500 mb-2">已隐藏: <span x-text="hiddenNames.length"></span></p><button @click="hiddenNames = []" class="w-full text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 rounded mb-4">恢复隐藏</button><p class="text-xs font-semibold text-slate-500 mb-2">题目显示</p><div class="max-h-60 overflow-y-auto space-y-1 mb-3 border border-slate-100 rounded p-1"><template x-for="(col, index) in colNames" :key="index"><label class="flex items-center text-xs text-slate-700 cursor-pointer hover:bg-slate-50 p-1.5 rounded"><input type="checkbox" name="toggle_col_visibility" :checked="!tempHiddenCols.includes(index)" @change="toggleTempCol(index)" class="rounded border-slate-300 mr-2"><span x-text="col" class="truncate"></span></label></template></div><button @click="applyColumns(); open = false" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded">确认</button></div></div></div>
                 </div>
 
                 <div class="w-full" id="table-scroll-container">

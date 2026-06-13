@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import time
 import datetime
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,6 +13,20 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     encoding='utf-8'
 )
+
+# === 课表内存缓存 ===
+# key: (token_prefix, class_id), value: (lessons, timestamp)
+_curriculum_cache = {}
+_CURRICULUM_CACHE_TTL = 86400  # 1 天
+
+# === 班级列表内存缓存 ===
+# key: (token_prefix, search_range, teacherType), value: (class_groups, timestamp)
+_class_list_cache = {}
+_CLASS_LIST_CACHE_TTL = 300  # 5 分钟
+
+def _get_cache_key(token, class_id):
+    """取 token 前 8 位作为用户标识，避免完整 token 占用内存"""
+    return (token[:8] if token else '', class_id)
 
 # ... (perform_login, fetch_class_curriculum, fetch_class_list, fetch_class_detail 保持不变) ...
 def perform_login(username, password, teacherType='0'):
@@ -27,6 +42,15 @@ def perform_login(username, password, teacherType='0'):
     except Exception as e: return None, str(e)
 
 def fetch_class_curriculum(token, class_id):
+    cache_key = _get_cache_key(token, class_id)
+    now = time.time()
+
+    # 命中缓存且未过期则直接返回
+    if cache_key in _curriculum_cache:
+        cached_lessons, cached_at = _curriculum_cache[cache_key]
+        if now - cached_at < _CURRICULUM_CACHE_TTL:
+            return cached_lessons
+
     url = f"https://rest.xiaohoucode.com/api/core/teachers/findCurriculumByClass?classId={class_id}"
     headers = { "accept": "application/json, text/plain, */*", "authorization": token, "User-Agent": "Mozilla/5.0", "Origin": "https://www.xiaohoucode.com" }
     try:
@@ -37,10 +61,21 @@ def fetch_class_curriculum(token, class_id):
         for d in data:
             lessons.append({ 'num': d.get('classNum', 0), 'name': d.get('lessonName', '未知'), 'date': d.get('classDate', ''), 'start': d.get('startTime', '') })
         lessons.sort(key=lambda x: x['num'])
+        # 写入缓存
+        _curriculum_cache[cache_key] = (lessons, now)
         return lessons
     except: return []
 
 def fetch_class_list(token, search_range=180, teacherType="0"):
+    # 检查班级列表内存缓存
+    list_cache_key = (token[:8] if token else '', search_range, teacherType)
+    now = time.time()
+    if list_cache_key in _class_list_cache:
+        cached_groups, cached_at = _class_list_cache[list_cache_key]
+        if now - cached_at < _CLASS_LIST_CACHE_TTL:
+            logging.info(f"Class List Cache HIT for range={search_range}")
+            return cached_groups, None
+
     url = "https://rest.xiaohoucode.com/api/core/teachers/partclasses"
     headers = { "Host": "rest.xiaohoucode.com", "Authorization": token, "User-Agent": "Mozilla/5.0", "Content-Type": "application/json", "Origin": "https://www.xiaohoucode.com" }
     groups = { 'open': [], 'closed': [], 'self': [] }
@@ -113,6 +148,17 @@ def fetch_class_list(token, search_range=180, teacherType="0"):
                     if status_val == 1: groups['open'].append(item)
                     else: groups['closed'].append(item)
                 else: groups['self'].append(item)
+
+        # 写入班级列表缓存
+        _class_list_cache[list_cache_key] = (groups, now)
+        # 预热课表缓存：将返回中自带的 curriculumnList 写入内存缓存
+        for group in groups.values():
+            for item in group:
+                if item.get('lessons'):
+                    warm_key = (token[:8] if token else '', item['id'])
+                    if warm_key not in _curriculum_cache:
+                        _curriculum_cache[warm_key] = (item['lessons'], now)
+        logging.info(f"Class List Fetched & Cached for range={search_range}")
         return groups, None
     except Exception as e: return None, f"Err: {str(e)}"
 

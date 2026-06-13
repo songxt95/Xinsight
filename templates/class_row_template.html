@@ -1,6 +1,8 @@
 <form action="/" method="post" class="w-full text-left p-5 class-list-item flex flex-col gap-4 border-b border-slate-100 last:border-0"
+      x-init="init()"
       x-data='{
           lessons: {{ cls.lessons | default([]) | tojson }},
+          hasPreloadedLessons: {{ 'true' if cls.lessons else 'false' }},
           isLoading: false,
 
           /* --- 花名册相关状态 --- */
@@ -10,13 +12,49 @@
           roster: [], // 结构: [{name: "张三", id: "uuid..."}, ...]
           isDeepScanning: false,
 
+          init() {
+              /* 如果后端已预加载课表，直接用，不再请求 */
+              if (this.hasPreloadedLessons && this.lessons.length > 0) return;
+              /* 否则尝试读缓存或请求 */
+              const tokenPrefix = document.cookie.match(/session=[^;]+/) ? "s" : "x";
+              const cacheKey = `xh_curriculum_${tokenPrefix}_{{ cls.id }}`;
+              try {
+                  const cached = sessionStorage.getItem(cacheKey);
+                  if (cached) {
+                      const parsed = JSON.parse(cached);
+                      if (parsed.lessons && parsed.lessons.length > 0) {
+                          this.lessons = parsed.lessons;
+                          return;
+                      }
+                  }
+              } catch (_) {}
+              /* 缓存也没有，自动请求 */
+              this.loadLessons();
+          },
           loadLessons() {
+              /* 优先读 sessionStorage 缓存，key 包含 token 前缀以区分用户 */
+              const tokenPrefix = document.cookie.match(/session=[^;]+/) ? "s" : "x";
+              const cacheKey = `xh_curriculum_${tokenPrefix}_{{ cls.id }}`;
+              try {
+                  const cached = sessionStorage.getItem(cacheKey);
+                  if (cached) {
+                      const parsed = JSON.parse(cached);
+                      if (parsed.lessons && parsed.lessons.length > 0) {
+                          this.lessons = parsed.lessons;
+                          this.isLoading = false;
+                          return;
+                      }
+                  }
+              } catch (_) {}
+
               this.isLoading = true;
               fetch(`/api/get_curriculum?classId={{ cls.id }}`)
                   .then(res => res.json())
                   .then(data => {
                       this.lessons = data.lessons || [];
                       this.isLoading = false;
+                      /* 写入 sessionStorage 缓存，包含时间戳用于校验 */
+                      try { sessionStorage.setItem(cacheKey, JSON.stringify({ lessons: this.lessons, ts: Date.now() })); } catch (_) {}
                   })
                   .catch(() => {
                       this.isLoading = false;
