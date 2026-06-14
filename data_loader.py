@@ -24,6 +24,9 @@ _CURRICULUM_CACHE_TTL = 86400  # 1 天
 _class_list_cache = {}
 _CLASS_LIST_CACHE_TTL = 300  # 5 分钟
 
+_PERFECT_SCORE_VALUES = {'100', '答题正确', '已订正'}
+_NON_ANSWERED_KEYWORDS = ('未打开', '未作答', '未运行')
+
 def _get_cache_key(token, class_id):
     """取 token 前 8 位作为用户标识，避免完整 token 占用内存"""
     return (token[:8] if token else '', class_id)
@@ -203,6 +206,19 @@ def fetch_class_detail(token, class_id):
     return result
 
 # === [v121 修改] 增加深度 Debug 日志 ===
+def _is_perfect_answer(score):
+    return str(score) in _PERFECT_SCORE_VALUES
+
+
+def _is_answered_score(score):
+    if score is None:
+        return False
+    text = str(score).strip()
+    if not text or text == '-':
+        return False
+    return all(keyword not in text for keyword in _NON_ANSWERED_KEYWORDS)
+
+
 def fetch_data(class_id, token, cuc_num, teacherType="0"):
     if not cuc_num: cuc_num = 1
 
@@ -281,7 +297,6 @@ def fetch_data(class_id, token, cuc_num, teacherType="0"):
 
         total_tasks = len(sorted_uids)
         rows = []
-        PERFECT_SCORES = {'100', '答题正确', '已订正'}
 
         for i, stu in enumerate(students):
             s_name = stu.get('studentName') or '未知学员'
@@ -300,7 +315,7 @@ def fetch_data(class_id, token, cuc_num, teacherType="0"):
                 score = score_map.get(uid, '-')
                 if score in ['-', '']: score = '未打开'
                 row_data['scores'].append(score)
-                if str(score) in PERFECT_SCORES: completed += 1
+                if _is_perfect_answer(score): completed += 1
             row_data['progress_text'] = f"{completed}/{total_tasks}"
             row_data['progress_percent'] = (completed / total_tasks * 100) if total_tasks > 0 else 0
             rows.append(row_data)
@@ -320,6 +335,149 @@ def fetch_data(class_id, token, cuc_num, teacherType="0"):
         return None, [], [], [], [], {"error": f"Error: {str(e)}"}
 
 # ... (后面的函数 fetch_student_overall_stats 等保持不变) ...
+def fetch_lesson_question_snapshot(class_id, token, cuc_num, teacherType="0"):
+    if not cuc_num:
+        cuc_num = 1
+
+    url = f"https://rest.xiaohoucode.com/api/core/stats/v2/stu/answers?classId={class_id}&cityCode=010&cucNum={cuc_num}&teacherType={teacherType}"
+    headers = {"Authorization": token, "User-Agent": "Mozilla/5.0"}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None, {"error": f"HTTP {response.status_code}"}
+
+        payload = response.json()
+        if payload.get('status') != 200:
+            return None, {"error": payload.get('message', 'API Error')}
+
+        students_raw = (payload.get('data') or {}).get('body') or []
+
+        bundle_defs = [
+            ('classPracticeBundle', '课堂'),
+            ('homeworkPracticeBundle', '课后'),
+            ('examBundle', '考试')
+        ]
+
+        question_meta = {}
+        students = []
+
+        for stu in students_raw:
+            student_name = stu.get('studentName') or '未知学员'
+            student_id = stu.get('studentId', '')
+            answer_map = {}
+
+            for bundle_key, bundle_label in bundle_defs:
+                bundle = stu.get(bundle_key)
+                if not bundle:
+                    continue
+                for p in bundle.get('practice', []):
+                    practice_id = str(p.get('practiceId') or '').strip()
+                    if not practice_id:
+                        continue
+
+                    uid = f"{bundle_key}:{practice_id}"
+                    answer_result = p.get('answerResult', '-')
+                    answer_map[uid] = answer_result
+
+                    if uid not in question_meta:
+                        practice_name = p.get('practiceName') or practice_id
+                        bundle_order = int(p.get('bundleOrder', 0) or 0)
+                        practice_order = int(p.get('practiceOrder', 0) or 0)
+                        order_text = f"{bundle_order}.{practice_order}"
+                        if not practice_name.startswith(order_text):
+                            display_name = f"{order_text} {practice_name}"
+                        else:
+                            display_name = practice_name
+
+                        question_meta[uid] = {
+                            'uid': uid,
+                            'practiceId': practice_id,
+                            'practiceName': practice_name,
+                            'displayName': display_name,
+                            'bundleKey': bundle_key,
+                            'bundleLabel': bundle_label,
+                            'bundleOrder': bundle_order,
+                            'practiceOrder': practice_order,
+                            'sortKey': (bundle_order, practice_order, practice_id)
+                        }
+
+            students.append({
+                'studentId': student_id,
+                'studentName': student_name,
+                'answers': answer_map
+            })
+
+        questions = sorted(question_meta.values(), key=lambda x: x['sortKey'])
+        question_uids = [q['uid'] for q in questions]
+
+        class_correct = 0
+        class_answered = 0
+        class_cells = []
+
+        for uid in question_uids:
+            q_correct = 0
+            q_answered = 0
+            for stu in students:
+                score = stu['answers'].get(uid, '-')
+                if _is_answered_score(score):
+                    q_answered += 1
+                    class_answered += 1
+                    if _is_perfect_answer(score):
+                        q_correct += 1
+                        class_correct += 1
+            class_cells.append({
+                'questionUid': uid,
+                'correctCount': q_correct,
+                'answeredCount': q_answered,
+                'accuracy': round((q_correct / q_answered) * 100, 2) if q_answered > 0 else None
+            })
+
+        for stu in students:
+            answered = 0
+            correct = 0
+            cells = []
+            for uid in question_uids:
+                score = stu['answers'].get(uid, '-')
+                cell_answered = _is_answered_score(score)
+                cell_correct = _is_perfect_answer(score)
+                if cell_answered:
+                    answered += 1
+                    if cell_correct:
+                        correct += 1
+                cells.append({
+                    'questionUid': uid,
+                    'raw': score,
+                    'answered': cell_answered,
+                    'correct': cell_correct,
+                    'accuracy': 100.0 if cell_correct else (0.0 if cell_answered else None)
+                })
+
+            stu['correctCount'] = correct
+            stu['answeredCount'] = answered
+            stu['accuracy'] = round((correct / answered) * 100, 2) if answered > 0 else None
+            stu['cells'] = cells
+
+        summary = {
+            'studentCount': len(students),
+            'questionCount': len(question_uids),
+            'correctCount': class_correct,
+            'answeredCount': class_answered,
+            'accuracy': round((class_correct / class_answered) * 100, 2) if class_answered > 0 else None
+        }
+
+        return {
+            'lessonNum': int(cuc_num),
+            'questions': questions,
+            'students': students,
+            'classCells': class_cells,
+            'summary': summary
+        }, None
+    except Exception as e:
+        logging.error(f"fetch_lesson_question_snapshot error: {str(e)}")
+        return None, {"error": str(e)}
+
+
 def fetch_student_overall_stats(token, class_ids, student_id, year):
     if not year: year = str(datetime.datetime.now().year)
     url = "https://rest.xiaohoucode.com/api/core/stats/s-practice/query/stats"

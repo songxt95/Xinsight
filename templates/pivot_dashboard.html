@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小猴编程 - 班级透视看板</title>
+    <script src="{{ url_for('static', filename='js/tailwindcss.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/alpine.js') }}"></script>
+    <style>
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background-color: #f8fafc; }
+        [x-cloak] { display: none !important; }
+        .pivot-cell { min-width: 72px; }
+        .sticky-left { position: sticky; left: 0; z-index: 10; background: white; }
+        .sticky-left-header { position: sticky; left: 0; z-index: 20; background: #f8fafc; }
+
+        .acc-pill { font-size: 12px; padding: 4px 10px; border-radius: 999px; min-width: 40px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; white-space: nowrap; }
+        .acc-perfect { background-color: #dcfce7; color: #15803d; }
+        .acc-high { background-color: #dbeafe; color: #1d4ed8; }
+        .acc-mid { background-color: #fef3c7; color: #b45309; }
+        .acc-low { background-color: #ffedd5; color: #c2410c; }
+        .acc-bad { background-color: #fee2e2; color: #b91c1c; }
+        .acc-empty { background-color: #f1f5f9; color: #94a3b8; }
+
+        .lesson-head-a { background-color: #EAF2FF; color: #1E3A8A; border-bottom: 2px solid #C9DAFF !important; }
+        .lesson-head-b { background-color: #EAF9F4; color: #065F46; border-bottom: 2px solid #C8EBDD !important; }
+        .lesson-sub-a { background-color: #F3F7FF; }
+        .lesson-sub-b { background-color: #F2FCF8; }
+        .lesson-cell-a { background-color: #F8FAFF; }
+        .lesson-cell-b { background-color: #F8FDFA; }
+
+        .bundle-head-summary { background-color: #EEF2FF; color: #4338CA; }
+        .bundle-head-class { background-color: #DBEAFE; color: #1D4ED8; }
+        .bundle-head-homework { background-color: #DCFCE7; color: #15803D; }
+        .bundle-head-exam { background-color: #FFEDD5; color: #C2410C; }
+        .bundle-head-unknown { background-color: #F1F5F9; color: #475569; }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800" x-data="pivotComponent()" x-cloak>
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-[1920px] mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-amber-500 text-white p-1.5 rounded-lg font-bold">PV</div>
+                <div>
+                    <div class="text-lg font-bold text-slate-900">班级透视看板</div>
+                    <div class="text-xs text-slate-500">指标：正确率（整体加权）</div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="/" class="px-3 py-2 rounded-lg text-sm bg-white border border-slate-200 text-slate-600 hover:bg-slate-50">返回首页</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="px-4 py-6">
+        <div class="max-w-[1920px] mx-auto space-y-4">
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+                    <div class="xl:col-span-12">
+                        <div class="flex flex-wrap items-center justify-between mb-2 gap-2">
+                            <div class="text-xs text-slate-500">班级选择</div>
+                            <div class="flex items-center gap-2">
+                                <input type="text" x-model.trim="classKeyword" placeholder="搜索班级名或上课时间" class="w-52 border border-slate-300 rounded px-2 py-1 text-xs" />
+                                <span class="text-[11px] text-slate-500">已选 <span x-text="selectedClassIds.length"></span> 个班级</span>
+                            </div>
+                        </div>
+
+                        <div class="max-h-[22rem] overflow-auto border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white">
+                            <template x-for="group in groupedClassTree" :key="group.key">
+                                <div class="p-2">
+                                    <div class="flex items-center justify-between py-1">
+                                        <div class="flex items-center gap-2">
+                                            <input type="checkbox"
+                                                   :checked="isGroupFullySelected(group)"
+                                                   :indeterminate="isGroupPartiallySelected(group)"
+                                                   @change="toggleGroupSelection(group, $event.target.checked)"
+                                                   class="rounded border-slate-300 text-indigo-600" />
+                                            <button type="button" @click="toggleGroup(group.key)" class="flex items-center gap-2 text-xs font-bold text-slate-700">
+                                                <svg class="w-3 h-3 transition-transform" :class="openedGroups.includes(group.key) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                                                <span x-text="group.label"></span>
+                                                <span class="text-slate-400 font-normal" x-text="`(${group.children.length}组)`"></span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div x-show="openedGroups.includes(group.key)" class="pl-4 pr-1 mt-1 space-y-2">
+                                        <template x-for="bucket in group.children" :key="group.key + '::' + bucket.name">
+                                            <div class="border border-slate-200 rounded-md p-2 bg-slate-50/40">
+                                                <div class="flex items-center justify-between">
+                                                    <div class="flex items-center gap-2">
+                                                        <input type="checkbox"
+                                                               :checked="isBucketFullySelected(bucket)"
+                                                               :indeterminate="isBucketPartiallySelected(bucket)"
+                                                               @change="toggleBucketSelection(bucket, $event.target.checked)"
+                                                               class="rounded border-slate-300 text-indigo-600" />
+                                                        <button type="button" @click="toggleBucket(group.key, bucket.name)" class="flex items-center gap-1 text-xs font-medium text-slate-700">
+                                                            <svg class="w-3 h-3 transition-transform" :class="isBucketOpened(group.key, bucket.name) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                                                            <span x-text="bucket.name"></span>
+                                                            <span class="text-slate-400 font-normal" x-text="`(${bucket.items.length})`"></span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div x-show="isBucketOpened(group.key, bucket.name)" class="mt-2 pl-4 space-y-1">
+                                                    <template x-for="cls in bucket.items" :key="cls.id">
+                                                        <label class="flex items-center gap-2 text-[12px] text-slate-700 cursor-pointer">
+                                                            <input type="checkbox" :checked="selectedClassIds.includes(cls.id)" @change="toggleClassById(cls.id)" class="rounded border-slate-300 text-indigo-600" />
+                                                            <span x-text="cls.timeLabel"></span>
+                                                        </label>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div class="mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50/60">
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <div class="text-xs text-slate-500">选择讲次</div>
+                                <div class="text-[11px] text-slate-400" x-text="waitingLessonEnd ? '请再点结束讲次' : '先点开始讲次，再点结束讲次'"></div>
+                            </div>
+
+                            <div class="flex flex-wrap gap-2 min-h-[32px] items-center">
+                                <template x-if="lessonLoading">
+                                    <span class="text-xs text-slate-400">正在同步课表...</span>
+                                </template>
+                                <template x-if="!lessonLoading && lessonOptions.length === 0">
+                                    <span class="text-xs text-slate-400">请先选择班级后同步课表</span>
+                                </template>
+                                <template x-for="lesson in lessonOptions" :key="'lesson-option-' + lesson.num">
+                                    <button type="button"
+                                            @click="pickLesson(lesson.num)"
+                                            :title="lesson.name"
+                                            class="w-8 h-8 rounded text-sm font-bold border transition"
+                                            :class="lessonButtonClass(lesson.num)">
+                                        <span x-text="lesson.num"></span>
+                                    </button>
+                                </template>
+                            </div>
+
+                            <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+                                <div class="text-[11px] text-slate-500">
+                                    已选范围：<span class="font-semibold text-indigo-600" x-text="lessonRangeText"></span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" @click="refreshLessonOptions(true)" class="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-xs text-slate-600">同步课表</button>
+                                    <button type="button" @click="resetLessonRange()" class="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-xs text-slate-600">重选讲次</button>
+                                    <button type="button" @click="loadPivot()" :disabled="loading || lessonLoading || !isLessonRangeReady"
+                                            class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed">
+                                        <span x-show="!loading">生成透视</span>
+                                        <span x-show="loading">加载中...</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-3 text-[12px] text-slate-500">
+                    口径：正确率 = 答对总题数 / 已作答总题数，未作答不计入分母。
+                </div>
+            </div>
+
+            <template x-if="errorMsg">
+                <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" x-text="errorMsg"></div>
+            </template>
+
+            <template x-if="meta">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div class="bg-white border border-slate-200 rounded-xl p-4">
+                        <div class="text-xs text-slate-500">已选班级</div>
+                        <div class="text-2xl font-bold text-slate-900" x-text="meta.selectedClassCount"></div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-4">
+                        <div class="text-xs text-slate-500">讲次数量</div>
+                        <div class="text-2xl font-bold text-slate-900" x-text="meta.selectedLessonCount"></div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-4">
+                        <div class="text-xs text-slate-500">加载失败对数</div>
+                        <div class="text-2xl font-bold" :class="meta.failedCount > 0 ? 'text-amber-600' : 'text-slate-900'" x-text="meta.failedCount"></div>
+                    </div>
+                </div>
+            </template>
+
+            <div class="bg-white border border-slate-200 rounded-xl overflow-hidden" x-show="classes.length > 0">
+                <div class="px-4 py-3 border-b border-slate-200 bg-slate-50/80 flex flex-wrap gap-2 items-center justify-between">
+                    <div class="text-sm font-bold text-slate-700">透视矩阵（唯一指标：正确率）</div>
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                        <div class="flex items-center gap-1 px-2 py-1 rounded border border-slate-300 bg-white">
+                            <span class="text-slate-500">题组：</span>
+                            <template x-for="opt in bundleOptions" :key="'bundle-opt-'+opt">
+                                <label class="inline-flex items-center gap-1 text-[11px] text-slate-700 px-1">
+                                    <input type="checkbox" :value="opt" :checked="selectedBundleLabels.includes(opt)" @change="toggleBundleFilter(opt)" class="rounded border-slate-300 text-indigo-600" />
+                                    <span x-text="opt"></span>
+                                </label>
+                            </template>
+                        </div>
+                        <button type="button" @click="toggleRowExpand()" class="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700">
+                            <span x-text="rowExpandButtonText"></span>
+                        </button>
+                        <button type="button" @click="toggleColExpand()" class="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700">
+                            <span x-text="colExpandButtonText"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="w-full overflow-auto max-h-[72vh]">
+                    <table class="w-full divide-y divide-slate-100 text-xs" id="main-table">
+                        <thead class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
+                            <tr class="divide-x divide-slate-100">
+                                <th rowspan="4" class="sticky-left-header px-2 py-3 text-left border-r border-slate-200 w-56 align-middle">
+                                    <div class="flex items-center h-full">班级 / 学生</div>
+                                </th>
+                                <template x-for="(grp, gi) in lessonColumnGroups" :key="'grp-'+grp.lessonKey">
+                                    <th :colspan="grp.span" class="px-1 py-1 text-center border-b border-r border-slate-200 text-[11px]"
+                                        :class="[lessonGroupClass(grp.lessonKey), gi > 0 ? 'border-l-2 border-l-indigo-300' : '']">
+                                        <button type="button" @click="toggleLessonExpand(grp.lessonKey)" class="w-full flex items-center justify-center gap-1.5 py-0.5 text-slate-700 hover:text-indigo-700">
+                                            <span class="font-bold" x-text="grp.label"></span>
+                                            <svg class="w-3.5 h-3.5 transition-transform" :class="isLessonExpanded(grp.lessonKey) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                                        </button>
+                                    </th>
+                                </template>
+                            </tr>
+                            <tr class="divide-x divide-slate-100">
+                                <template x-for="bucket in lessonBucketGroups" :key="'bk-'+bucket.lessonKey+'-'+bucket.bundleKey+'-'+bucket.startColKey">
+                                    <th :colspan="bucket.span" class="px-1 py-1 text-center border-b border-r border-slate-200 text-[10px] normal-case"
+                                        :class="[lessonSubHeaderClass(bucket.lessonKey), bundleHeaderClass(bucket.bundleLabel), bucket.isLessonStart ? 'border-l-2 border-l-indigo-300' : '']">
+                                        <template x-if="bucket.bundleLabel === '讲次总览'">
+                                            <span class="text-slate-600" x-text="bucket.bundleLabel"></span>
+                                        </template>
+                                        <template x-if="bucket.bundleLabel !== '讲次总览'">
+                                            <button type="button" @click="toggleBundleExpand(bucket.lessonKey, bucket.bundleLabel)" class="w-full flex items-center justify-center gap-1 text-slate-700 hover:text-indigo-700">
+                                                <span x-text="bucket.bundleLabel"></span>
+                                                <svg class="w-3 h-3 transition-transform" :class="isBundleExpanded(bucket.lessonKey, bucket.bundleLabel) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                                            </button>
+                                        </template>
+                                    </th>
+                                </template>
+                            </tr>
+                            <tr class="divide-x divide-slate-100">
+                                <template x-for="col in flatColumns" :key="'qh-'+col.key">
+                                    <th class="pivot-cell px-1 py-1 text-center font-mono border-b border-r border-slate-200 text-[10px] text-slate-500"
+                                        :class="[lessonSubHeaderClass(col.lessonKey), isLessonGroupStart(col) ? 'border-l-2 border-l-indigo-300' : '']">
+                                        <span x-text="col.label"></span>
+                                    </th>
+                                </template>
+                            </tr>
+                            <tr class="divide-x divide-slate-100">
+                                <template x-for="col in flatColumns" :key="'qn-'+col.key">
+                                    <th class="pivot-cell px-1 py-1 text-center border-b border-r border-slate-200 text-[10px] normal-case align-middle"
+                                        :class="[lessonSubHeaderClass(col.lessonKey), isLessonGroupStart(col) ? 'border-l-2 border-l-indigo-300' : '']"
+                                        :title="col.questionTitle || ''">
+                                        <template x-if="col.type === 'lesson'">
+                                            <span class="text-slate-400">-</span>
+                                        </template>
+                                        <template x-if="col.type === 'question'">
+                                            <span class="truncate max-w-[180px] inline-block text-slate-600 text-center" x-text="col.questionTitle || '-'" ></span>
+                                        </template>
+                                        <template x-if="col.type === 'bundle-summary'">
+                                            <span class="text-slate-500" x-text="col.questionTitle || '-'" ></span>
+                                        </template>
+                                    </th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                            <template x-for="row in rowRecords" :key="row.key">
+                                <tr class="hover:bg-indigo-50/40 transition group text-xs">
+                                    <td class="sticky-left px-2 py-3 border-r border-slate-100 font-medium text-slate-900 bg-white">
+                                        <div class="flex items-center gap-2" :class="row.type === 'student' ? 'pl-4' : ''">
+                                            <template x-if="row.type === 'class'">
+                                                <button type="button" @click="toggleClassExpand(row.classRef.classId)" class="shrink-0 text-slate-500 hover:text-indigo-600">
+                                                    <svg class="w-3.5 h-3.5 transition-transform" :class="isClassExpanded(row.classRef.classId) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                                                </button>
+                                            </template>
+                                            <template x-if="row.type === 'student'">
+                                                <span class="w-3.5 h-3.5 shrink-0"></span>
+                                            </template>
+                                            <div class="overflow-hidden">
+                                                <div class="text-[12px] font-bold text-slate-700 truncate" x-text="row.label"></div>
+                                                <div x-show="row.type === 'class'" class="text-[10px] text-slate-400 truncate" x-text="row.timeText || '时间未知'"></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <template x-for="col in flatColumns" :key="row.key + '::' + col.key">
+                                        <td class="px-1 py-3 text-center align-middle border-r border-slate-200"
+                                            :class="lessonCellClass(col.lessonKey)">
+                                            <div class="h-8 flex items-center justify-center">
+                                                <span class="acc-pill" :class="accClass(rowCellValue(row, col))" x-text="formatPct(rowCellValue(row, col))"></span>
+                                            </div>
+                                        </td>
+                                    </template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function pivotComponent() {
+            const initialClassOptions = {{ all_classes_json | safe }};
+            const initialSelected = {{ selected_class_ids_json | safe }};
+            return {
+                classOptions: initialClassOptions,
+                selectedClassIds: initialSelected,
+                lessonStart: {{ lesson_start | default(1) }},
+                lessonEnd: {{ lesson_end | default(1) }},
+                loading: false,
+                lessonLoading: false,
+                errorMsg: '',
+                lessons: [],
+                questionColumns: {},
+                classes: [],
+                meta: null,
+                openedGroups: ['open'],
+                openedBuckets: [],
+                classKeyword: '',
+                lessonOptions: [],
+                waitingLessonEnd: false,
+                classExpandedMap: {},
+                lessonExpandedMap: {},
+                bundleExpandedMap: {},
+                selectedBundleLabels: ['课堂', '课后', '考试', '未分类'],
+
+                init() {
+                    this.openedBuckets = this.groupedClassTree
+                        .filter(g => g.key === 'open')
+                        .flatMap(g => g.children.map(c => this.bucketKey(g.key, c.name)));
+
+                    this.refreshLessonOptions();
+                    if (this.selectedClassIds.length > 0) {
+                        this.loadPivot();
+                    }
+                },
+
+                toggleClassById(classId) {
+                    const idx = this.selectedClassIds.indexOf(classId);
+                    if (idx >= 0) this.selectedClassIds.splice(idx, 1);
+                    else this.selectedClassIds.push(classId);
+                    this.refreshLessonOptions();
+                },
+
+                bucketKey(groupKey, bucketName) {
+                    return `${groupKey}::${bucketName}`;
+                },
+
+                toggleGroup(groupKey) {
+                    if (this.openedGroups.includes(groupKey)) {
+                        this.openedGroups = this.openedGroups.filter(g => g !== groupKey);
+                    } else {
+                        this.openedGroups.push(groupKey);
+                    }
+                },
+
+                toggleBucket(groupKey, bucketName) {
+                    const key = this.bucketKey(groupKey, bucketName);
+                    if (this.openedBuckets.includes(key)) {
+                        this.openedBuckets = this.openedBuckets.filter(x => x !== key);
+                    } else {
+                        this.openedBuckets.push(key);
+                    }
+                },
+
+                isBucketOpened(groupKey, bucketName) {
+                    return this.openedBuckets.includes(this.bucketKey(groupKey, bucketName));
+                },
+
+                toggleGroupSelection(group, checked) {
+                    const ids = group.children.flatMap(bucket => bucket.items.map(item => item.id));
+                    this.applySelection(ids, checked);
+                },
+
+                async refreshLessonOptions(forceResetRange = false) {
+                    const selectedIds = new Set(this.selectedClassIds);
+                    const selected = this.classOptions.filter(c => selectedIds.has(c.id));
+
+                    if (selected.length === 0) {
+                        this.lessonOptions = [];
+                        this.lessonStart = null;
+                        this.lessonEnd = null;
+                        this.waitingLessonEnd = false;
+                        return;
+                    }
+
+                    this.lessonLoading = true;
+                    try {
+                        const lessonMap = new Map();
+                        await Promise.all(selected.map(async cls => {
+                            const resp = await fetch(`/api/get_curriculum?classId=${cls.id}`);
+                            const payload = await resp.json();
+                            const lessons = payload.lessons || [];
+                            lessons.forEach(ls => {
+                                const num = Number(ls.num || 0);
+                                if (!Number.isFinite(num) || num <= 0) return;
+                                if (!lessonMap.has(num)) {
+                                    lessonMap.set(num, {
+                                        num,
+                                        name: ls.name || `第${num}讲`
+                                    });
+                                }
+                            });
+                        }));
+
+                        const options = Array.from(lessonMap.values()).sort((a, b) => a.num - b.num);
+                        this.lessonOptions = options;
+
+                        const hasCurrentStart = options.some(x => x.num === Number(this.lessonStart));
+                        const hasCurrentEnd = options.some(x => x.num === Number(this.lessonEnd));
+
+                        if (forceResetRange || !hasCurrentStart || !hasCurrentEnd || Number(this.lessonStart) > Number(this.lessonEnd)) {
+                            if (options.length > 0) {
+                                this.lessonStart = options[0].num;
+                                this.lessonEnd = options[0].num;
+                            } else {
+                                this.lessonStart = null;
+                                this.lessonEnd = null;
+                            }
+                            this.waitingLessonEnd = false;
+                        }
+                    } catch (_) {
+                        this.lessonOptions = [];
+                    } finally {
+                        this.lessonLoading = false;
+                    }
+                },
+
+                pickLesson(num) {
+                    const n = Number(num);
+                    if (!Number.isFinite(n)) return;
+
+                    if (!this.waitingLessonEnd) {
+                        this.lessonStart = n;
+                        this.lessonEnd = n;
+                        this.waitingLessonEnd = true;
+                        return;
+                    }
+
+                    if (n < Number(this.lessonStart)) {
+                        this.lessonEnd = Number(this.lessonStart);
+                        this.lessonStart = n;
+                    } else {
+                        this.lessonEnd = n;
+                    }
+                    this.waitingLessonEnd = false;
+                },
+
+                resetLessonRange() {
+                    this.waitingLessonEnd = false;
+                    if (this.lessonOptions.length > 0) {
+                        this.lessonStart = this.lessonOptions[0].num;
+                        this.lessonEnd = this.lessonOptions[0].num;
+                    } else {
+                        this.lessonStart = null;
+                        this.lessonEnd = null;
+                    }
+                },
+
+                lessonButtonClass(num) {
+                    const n = Number(num);
+                    const s = Number(this.lessonStart);
+                    const e = Number(this.lessonEnd);
+                    const inRange = Number.isFinite(s) && Number.isFinite(e) && n >= s && n <= e;
+                    const isEdge = n === s || n === e;
+
+                    if (isEdge) return 'bg-indigo-500 text-white border-indigo-500';
+                    if (inRange) return 'bg-indigo-50 text-indigo-600 border-indigo-200';
+                    return 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:text-indigo-600';
+                },
+
+                get lessonRangeText() {
+                    const s = Number(this.lessonStart);
+                    const e = Number(this.lessonEnd);
+                    if (!Number.isFinite(s) || !Number.isFinite(e)) return '未选择';
+                    if (s === e) return `第${s}讲`;
+                    return `第${s}讲 - 第${e}讲`;
+                },
+
+                get isLessonRangeReady() {
+                    const s = Number(this.lessonStart);
+                    const e = Number(this.lessonEnd);
+                    return Number.isFinite(s) && Number.isFinite(e) && s > 0 && e >= s;
+                },
+
+                toggleBucketSelection(bucket, checked) {
+                    const ids = bucket.items.map(item => item.id);
+                    this.applySelection(ids, checked);
+                },
+
+                applySelection(ids, checked) {
+                    const set = new Set(this.selectedClassIds);
+                    ids.forEach(id => {
+                        if (checked) set.add(id);
+                        else set.delete(id);
+                    });
+                    this.selectedClassIds = Array.from(set);
+                    this.refreshLessonOptions();
+                },
+
+                isGroupFullySelected(group) {
+                    const ids = group.children.flatMap(bucket => bucket.items.map(item => item.id));
+                    if (ids.length === 0) return false;
+                    return ids.every(id => this.selectedClassIds.includes(id));
+                },
+
+                isGroupPartiallySelected(group) {
+                    const ids = group.children.flatMap(bucket => bucket.items.map(item => item.id));
+                    if (ids.length === 0) return false;
+                    const selectedCount = ids.filter(id => this.selectedClassIds.includes(id)).length;
+                    return selectedCount > 0 && selectedCount < ids.length;
+                },
+
+                isBucketFullySelected(bucket) {
+                    const ids = bucket.items.map(item => item.id);
+                    if (ids.length === 0) return false;
+                    return ids.every(id => this.selectedClassIds.includes(id));
+                },
+
+                isBucketPartiallySelected(bucket) {
+                    const ids = bucket.items.map(item => item.id);
+                    if (ids.length === 0) return false;
+                    const selectedCount = ids.filter(id => this.selectedClassIds.includes(id)).length;
+                    return selectedCount > 0 && selectedCount < ids.length;
+                },
+
+                ensureExpandMaps() {
+                    const classMap = {};
+                    (this.classes || []).forEach(cls => {
+                        classMap[cls.classId] = Boolean(this.classExpandedMap[cls.classId]);
+                    });
+                    this.classExpandedMap = classMap;
+
+                    const lessonMap = {};
+                    (this.lessons || []).forEach(lesson => {
+                        lessonMap[lesson.key] = Boolean(this.lessonExpandedMap[lesson.key]);
+                    });
+                    this.lessonExpandedMap = lessonMap;
+
+                    const bundleMap = {};
+                    (this.lessons || []).forEach(lesson => {
+                        const lessonKey = lesson.key;
+                        if (!lessonMap[lessonKey]) return;
+                        const questions = this.questionColumns[lessonKey] || [];
+                        const labels = new Set(questions.map(q => (q.bundleLabel || '未分类')));
+                        labels.forEach(label => {
+                            const key = `${lessonKey}::${label}`;
+                            bundleMap[key] = this.bundleExpandedMap[key] !== false;
+                        });
+                    });
+                    this.bundleExpandedMap = bundleMap;
+                },
+
+                isClassExpanded(classId) {
+                    return Boolean(this.classExpandedMap[classId]);
+                },
+
+                toggleClassExpand(classId) {
+                    this.classExpandedMap = {
+                        ...this.classExpandedMap,
+                        [classId]: !this.isClassExpanded(classId)
+                    };
+                },
+
+                isLessonExpanded(lessonKey) {
+                    return Boolean(this.lessonExpandedMap[lessonKey]);
+                },
+
+                toggleLessonExpand(lessonKey) {
+                    const next = !this.isLessonExpanded(lessonKey);
+                    this.lessonExpandedMap = {
+                        ...this.lessonExpandedMap,
+                        [lessonKey]: next
+                    };
+                    if (next) {
+                        const questions = this.questionColumns[lessonKey] || [];
+                        const labels = new Set(questions.map(q => (q.bundleLabel || '未分类')));
+                        const bundleMap = { ...this.bundleExpandedMap };
+                        labels.forEach(label => {
+                            bundleMap[`${lessonKey}::${label}`] = true;
+                        });
+                        this.bundleExpandedMap = bundleMap;
+                    }
+                },
+
+                bundleMapKey(lessonKey, bundleLabel) {
+                    return `${lessonKey}::${bundleLabel || '未分类'}`;
+                },
+
+                isBundleExpanded(lessonKey, bundleLabel) {
+                    const key = this.bundleMapKey(lessonKey, bundleLabel);
+                    return this.bundleExpandedMap[key] !== false;
+                },
+
+                toggleBundleExpand(lessonKey, bundleLabel) {
+                    const key = this.bundleMapKey(lessonKey, bundleLabel);
+                    this.bundleExpandedMap = {
+                        ...this.bundleExpandedMap,
+                        [key]: !this.isBundleExpanded(lessonKey, bundleLabel)
+                    };
+                },
+
+                get allClassesExpanded() {
+                    const ids = (this.classes || []).map(cls => cls.classId);
+                    return ids.length > 0 && ids.every(id => this.isClassExpanded(id));
+                },
+
+                get allLessonsExpanded() {
+                    const keys = (this.lessons || []).map(lesson => lesson.key);
+                    return keys.length > 0 && keys.every(key => this.isLessonExpanded(key));
+                },
+
+                get rowExpandButtonText() {
+                    return this.allClassesExpanded ? '收起所有学生' : '展开所有学生';
+                },
+
+                get colExpandButtonText() {
+                    return this.allLessonsExpanded ? '收起所有题目' : '展开所有题目';
+                },
+
+                get bundleOptions() {
+                    const defaults = ['课堂', '课后', '考试', '未分类'];
+                    const found = new Set(defaults);
+                    Object.values(this.questionColumns || {}).forEach(list => {
+                        (list || []).forEach(q => found.add(q.bundleLabel || '未分类'));
+                    });
+                    return Array.from(found);
+                },
+
+                toggleBundleFilter(label) {
+                    const exists = this.selectedBundleLabels.includes(label);
+                    if (exists) {
+                        this.selectedBundleLabels = this.selectedBundleLabels.filter(x => x !== label);
+                    } else {
+                        this.selectedBundleLabels = [...this.selectedBundleLabels, label];
+                    }
+                },
+
+                bundleVisible(label) {
+                    return this.selectedBundleLabels.includes(label || '未分类');
+                },
+
+                toggleRowExpand() {
+                    const shouldExpand = !this.allClassesExpanded;
+                    const nextMap = { ...this.classExpandedMap };
+                    (this.classes || []).forEach(cls => {
+                        nextMap[cls.classId] = shouldExpand;
+                    });
+                    this.classExpandedMap = nextMap;
+                },
+
+                toggleColExpand() {
+                    const shouldExpand = !this.allLessonsExpanded;
+                    const nextMap = { ...this.lessonExpandedMap };
+                    (this.lessons || []).forEach(lesson => {
+                        nextMap[lesson.key] = shouldExpand;
+                    });
+                    this.lessonExpandedMap = nextMap;
+                },
+
+                get groupedClassTree() {
+                    const groupMeta = {
+                        open: '开课中',
+                        closed: '已结课',
+                        self: '自学/活动'
+                    };
+
+                    const kw = (this.classKeyword || '').toLowerCase();
+                    const hasKeyword = kw.length > 0;
+
+                    const treeMap = {
+                        open: new Map(),
+                        closed: new Map(),
+                        self: new Map()
+                    };
+
+                    this.classOptions.forEach(cls => {
+                        const name = String(cls.name || '');
+                        const timeText = String(cls.timeLabel || cls.timeText || '');
+                        if (hasKeyword) {
+                            const hay = (name + ' ' + timeText).toLowerCase();
+                            if (!hay.includes(kw)) return;
+                        }
+
+                        const g = cls.group || 'closed';
+                        if (!treeMap[g]) treeMap[g] = new Map();
+                        if (!treeMap[g].has(name)) {
+                            treeMap[g].set(name, []);
+                        }
+                        treeMap[g].get(name).push(cls);
+                    });
+
+                    const order = ['open', 'closed', 'self'];
+                    return order.map(groupKey => {
+                        const bucketMap = treeMap[groupKey] || new Map();
+                        const children = Array.from(bucketMap.entries()).map(([name, items]) => {
+                            const sortedItems = [...items].sort((a, b) => {
+                                const av = `${a.year || ''}-${a.startDate || ''}-${a.endDate || ''}`;
+                                const bv = `${b.year || ''}-${b.startDate || ''}-${b.endDate || ''}`;
+                                return bv.localeCompare(av);
+                            });
+                            return { name, items: sortedItems };
+                        }).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+                        return {
+                            key: groupKey,
+                            label: groupMeta[groupKey] || groupKey,
+                            children
+                        };
+                    }).filter(g => g.children.length > 0);
+                },
+
+                get selectedClasses() {
+                    const selectedSet = new Set(this.selectedClassIds);
+                    return this.classOptions
+                        .filter(c => selectedSet.has(c.id))
+                        .map(c => ({ id: c.id, name: c.name, year: c.year, timeText: c.timeText, timeLabel: c.timeLabel }));
+                },
+
+                async loadPivot() {
+                    this.errorMsg = '';
+
+                    if (this.selectedClasses.length === 0) {
+                        this.errorMsg = '请先选择至少一个班级';
+                        return;
+                    }
+                    if (!this.isLessonRangeReady) {
+                        this.errorMsg = '请选择有效讲次范围';
+                        return;
+                    }
+
+                    this.loading = true;
+                    try {
+                        const resp = await fetch('/api/pivot/accuracy', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                classes: this.selectedClasses,
+                                lessonStart: this.lessonStart,
+                                lessonEnd: this.lessonEnd
+                            })
+                        });
+                        const payload = await resp.json();
+                        if (!resp.ok) {
+                            throw new Error(payload.error || '透视数据加载失败');
+                        }
+
+                        this.lessons = payload.lessons || [];
+                        this.questionColumns = payload.questionColumns || {};
+                        this.classes = payload.classes || [];
+                        this.meta = payload.meta || null;
+                        this.ensureExpandMaps();
+                    } catch (err) {
+                        this.errorMsg = err.message || '透视数据加载失败';
+                        this.lessons = [];
+                        this.questionColumns = {};
+                        this.classes = [];
+                        this.meta = null;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                get flatColumns() {
+                    const cols = [];
+                    this.lessons.forEach(lesson => {
+                        const lessonKey = lesson.key;
+                        const expanded = this.isLessonExpanded(lessonKey);
+                        if (!expanded) {
+                            cols.push({
+                                key: `lesson:${lessonKey}`,
+                                lessonKey,
+                                type: 'lesson',
+                                bundleLabel: '讲次总览',
+                                label: `第${lesson.num}讲`,
+                                subLabel: ''
+                            });
+                            return;
+                        }
+
+                        const questions = this.questionColumns[lessonKey] || [];
+                        const grouped = new Map();
+                        questions.forEach((q, idx) => {
+                            const bundleLabel = q.bundleLabel || '未分类';
+                            if (!grouped.has(bundleLabel)) grouped.set(bundleLabel, []);
+                            grouped.get(bundleLabel).push({ q, idx });
+                        });
+
+                        const activeBundleLabels = this.selectedBundleLabels;
+                        if (activeBundleLabels.length === 0) {
+                            cols.push({
+                                key: `lesson:${lesson.key}:bundle:none-selected`,
+                                lessonKey,
+                                type: 'bundle-empty',
+                                bundleLabel: '未选择题组',
+                                label: '-',
+                                questionTitle: '-',
+                                subLabel: `第${lesson.num}讲`
+                            });
+                            return;
+                        }
+
+                        const selectedGroups = activeBundleLabels.map(bundleLabel => ({
+                            bundleLabel,
+                            items: grouped.get(bundleLabel) || []
+                        }));
+                        const hasAnyData = selectedGroups.some(g => g.items.length > 0);
+
+                        if (!hasAnyData) {
+                            cols.push({
+                                key: `lesson:${lesson.key}:bundle:none`,
+                                lessonKey,
+                                type: 'bundle-empty',
+                                bundleLabel: '未命中题组',
+                                label: '-',
+                                questionTitle: '-',
+                                subLabel: `第${lesson.num}讲`
+                            });
+                            return;
+                        }
+
+                        selectedGroups.forEach(({ bundleLabel, items }) => {
+                            if (items.length === 0) return;
+
+                            if (!this.isBundleExpanded(lessonKey, bundleLabel)) {
+                                cols.push({
+                                    key: `lesson:${lesson.key}:bundle:${bundleLabel}`,
+                                    lessonKey,
+                                    type: 'bundle-summary',
+                                    bundleLabel,
+                                    label: `${items.length}题`,
+                                    questionTitle: `${bundleLabel}（汇总）`,
+                                    subLabel: `第${lesson.num}讲`
+                                });
+                                return;
+                            }
+
+                            items.forEach(({ q, idx }) => {
+                                cols.push({
+                                    key: `lesson:${lesson.key}:q:${q.questionUid}`,
+                                    lessonKey,
+                                    type: 'question',
+                                    questionUid: q.questionUid,
+                                    label: q.orderLabel || String(idx + 1),
+                                    bundleLabel,
+                                    questionTitle: q.practiceName || q.displayName || q.practiceId || '-',
+                                    subLabel: `第${lesson.num}讲`
+                                });
+                            });
+                        });
+                    });
+                    return cols;
+                },
+
+                get rowRecords() {
+                    const rows = [];
+                    this.classes.forEach(cls => {
+                        rows.push({
+                            key: `class:${cls.classId}`,
+                            type: 'class',
+                            classRef: cls,
+                            label: cls.className,
+                            timeText: cls.timeText || cls.timeLabel || ''
+                        });
+                        if (this.isClassExpanded(cls.classId)) {
+                            (cls.students || []).forEach(stu => {
+                                rows.push({
+                                    key: `class:${cls.classId}:stu:${stu.studentId || stu.studentName}`,
+                                    type: 'student',
+                                    classRef: cls,
+                                    studentRef: stu,
+                                    label: stu.studentName
+                                });
+                            });
+                        }
+                    });
+                    return rows;
+                },
+
+                rowCellValue(row, col) {
+                    const lessonData = (row.type === 'class' ? row.classRef.lessons : row.studentRef.lessons) || {};
+                    const lesson = lessonData[col.lessonKey];
+                    if (!lesson) return null;
+
+                    if (col.type === 'lesson') {
+                        return lesson.accuracy;
+                    }
+
+                    if (col.type === 'bundle-empty') {
+                        return null;
+                    }
+
+                    if (col.type === 'bundle-summary') {
+                        const values = [];
+                        const questionMap = lesson.questions || {};
+                        Object.entries(questionMap).forEach(([uid, cell]) => {
+                            const meta = (this.questionColumns[col.lessonKey] || []).find(q => q.questionUid === uid);
+                            const label = (meta?.bundleLabel || '未分类');
+                            if (label === col.bundleLabel && cell && cell.accuracy !== null && cell.accuracy !== undefined && !Number.isNaN(cell.accuracy)) {
+                                values.push(Number(cell.accuracy));
+                            }
+                        });
+                        if (values.length === 0) return null;
+                        const sum = values.reduce((a, b) => a + b, 0);
+                        return sum / values.length;
+                    }
+
+                    if (!col.questionUid) return null;
+                    const question = (lesson.questions || {})[col.questionUid];
+                    if (!question) return null;
+                    return question.accuracy;
+                },
+
+                get lessonColumnGroups() {
+                    const groups = [];
+                    let current = null;
+                    this.flatColumns.forEach(col => {
+                        const lessonKey = col.lessonKey;
+                        if (!current || current.lessonKey !== lessonKey) {
+                            const lesson = this.lessons.find(l => l.key === lessonKey);
+                            current = {
+                                lessonKey,
+                                label: lesson ? `第${lesson.num}讲` : col.subLabel || '',
+                                span: 0
+                            };
+                            groups.push(current);
+                        }
+                        current.span += 1;
+                    });
+                    return groups;
+                },
+
+                get lessonBucketGroups() {
+                    const groups = [];
+                    let current = null;
+                    this.flatColumns.forEach((col, idx) => {
+                        const isBundleType = col.type === 'question' || col.type === 'bundle-summary';
+                        const bucketLabel = isBundleType ? (col.bundleLabel || '未分类') : '讲次总览';
+                        const bundleKey = `${col.lessonKey}::${bucketLabel}`;
+
+                        if (!current || current.bundleKey !== bundleKey) {
+                            current = {
+                                bundleKey,
+                                lessonKey: col.lessonKey,
+                                bundleLabel: bucketLabel,
+                                startColKey: col.key,
+                                span: 0,
+                                isLessonStart: idx === 0 || this.flatColumns[idx - 1].lessonKey !== col.lessonKey
+                            };
+                            groups.push(current);
+                        }
+                        current.span += 1;
+                    });
+                    return groups;
+                },
+
+                lessonGroupIndex(lessonKey) {
+                    const idx = (this.lessons || []).findIndex(item => item.key === lessonKey);
+                    return idx >= 0 ? idx : 0;
+                },
+
+                lessonGroupClass(lessonKey) {
+                    return this.lessonGroupIndex(lessonKey) % 2 === 0 ? 'lesson-head-a' : 'lesson-head-b';
+                },
+
+                lessonSubHeaderClass(lessonKey) {
+                    return this.lessonGroupIndex(lessonKey) % 2 === 0 ? 'lesson-sub-a' : 'lesson-sub-b';
+                },
+
+                lessonCellClass(lessonKey) {
+                    return this.lessonGroupIndex(lessonKey) % 2 === 0 ? 'lesson-cell-a' : 'lesson-cell-b';
+                },
+
+                bundleHeaderClass(bundleLabel) {
+                    if (bundleLabel === '课堂') return 'bundle-head-class';
+                    if (bundleLabel === '课后') return 'bundle-head-homework';
+                    if (bundleLabel === '考试') return 'bundle-head-exam';
+                    if (bundleLabel === '讲次总览') return 'bundle-head-summary';
+                    return 'bundle-head-unknown';
+                },
+
+                isLessonGroupStart(col) {
+                    if (!col) return false;
+                    const cols = this.flatColumns;
+                    const idx = cols.findIndex(item => item.key === col.key);
+                    if (idx <= 0) return false;
+                    return cols[idx - 1].lessonKey !== col.lessonKey;
+                },
+
+                formatPct(v) {
+                    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+                    return `${Math.round(v)}%`;
+                },
+
+                accClass(v) {
+                    if (v === null || v === undefined || Number.isNaN(v)) return 'acc-empty';
+                    if (v >= 95) return 'acc-perfect';
+                    if (v >= 85) return 'acc-high';
+                    if (v >= 70) return 'acc-mid';
+                    if (v >= 60) return 'acc-low';
+                    return 'acc-bad';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

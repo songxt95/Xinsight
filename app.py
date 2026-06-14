@@ -5,6 +5,7 @@ import time
 import os
 import secrets
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -14,7 +15,7 @@ from playwright.sync_api import sync_playwright
 from data_loader import (
     fetch_data, perform_login, fetch_class_list,
     fetch_class_curriculum, fetch_student_overall_stats, fetch_student_detailed_history_v2,
-    fetch_class_detail
+    fetch_class_detail, fetch_lesson_question_snapshot
 )
 
 # 解析 .env 文件的函数
@@ -204,6 +205,300 @@ def get_curriculum():
     class_id = request.args.get('classId')
     lessons = fetch_class_curriculum(token, class_id)
     return jsonify({'lessons': lessons})
+
+
+def _flatten_class_groups(class_groups):
+    flattened = []
+    for group_key in ['open', 'closed', 'self']:
+        for cls in class_groups.get(group_key, []):
+            start_date = str(cls.get('startDate', '') or '')
+            end_date = str(cls.get('endTime', '') or '')
+            time_text = str(cls.get('time', '') or '')
+            term_name = str(cls.get('termName', '') or '')
+            year = str(cls.get('year', '') or '')
+
+            time_label = time_text or '时间未知'
+
+            flattened.append({
+                'id': cls.get('id', ''),
+                'name': cls.get('name', '未命名班级'),
+                'year': year,
+                'group': group_key,
+                'type': cls.get('type', ''),
+                'status': cls.get('status', 0),
+                'termName': term_name,
+                'startDate': start_date,
+                'endDate': end_date,
+                'timeText': time_text,
+                'timeLabel': time_label
+            })
+    return flattened
+
+
+@app.route('/pivot')
+def pivot_dashboard():
+    token = session.get('token')
+    teacherType = session.get('teacherType', '0')
+    username = session.get('username', '')
+
+    if not token:
+        return redirect(url_for('index'))
+
+    try:
+        search_range = int(request.args.get('range', 180))
+    except (TypeError, ValueError):
+        search_range = 180
+
+    class_groups, err = fetch_class_list(token, search_range, teacherType)
+    if err:
+        session.clear()
+        return render_template('login.html', error='登录已过期，请重新登录', default_user=username)
+
+    selected_ids = [x.strip() for x in request.args.get('classIds', '').split(',') if x.strip()]
+
+    try:
+        lesson_start = int(request.args.get('lessonStart', 1))
+    except (TypeError, ValueError):
+        lesson_start = 1
+    try:
+        lesson_end = int(request.args.get('lessonEnd', lesson_start))
+    except (TypeError, ValueError):
+        lesson_end = lesson_start
+
+    lesson_start = max(1, lesson_start)
+    lesson_end = max(lesson_start, lesson_end)
+
+    return render_template(
+        'pivot_dashboard.html',
+        username=username,
+        search_range=search_range,
+        class_groups=class_groups,
+        all_classes_json=json.dumps(_flatten_class_groups(class_groups), ensure_ascii=False),
+        selected_class_ids_json=json.dumps(selected_ids, ensure_ascii=False),
+        lesson_start=lesson_start,
+        lesson_end=lesson_end
+    )
+
+
+@app.route('/api/pivot/accuracy', methods=['POST'])
+def pivot_accuracy_api():
+    token = session.get('token')
+    teacherType = session.get('teacherType', '0')
+
+    if not token:
+        return jsonify({'error': '请先登录后再使用透视看板'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    raw_classes = payload.get('classes', [])
+
+    selected_classes = []
+    seen_ids = set()
+    for item in raw_classes:
+        class_id = str(item.get('id', '')).strip()
+        if not class_id or class_id in seen_ids:
+            continue
+        selected_classes.append({
+            'id': class_id,
+            'name': str(item.get('name', '')).strip() or class_id,
+            'year': str(item.get('year', '')).strip(),
+            'timeText': str(item.get('timeText', '')).strip(),
+            'timeLabel': str(item.get('timeLabel', '')).strip()
+        })
+        seen_ids.add(class_id)
+
+    if not selected_classes:
+        return jsonify({'error': '请至少选择一个班级'}), 400
+
+    try:
+        lesson_start = int(payload.get('lessonStart', 1))
+        lesson_end = int(payload.get('lessonEnd', lesson_start))
+    except (TypeError, ValueError):
+        return jsonify({'error': '讲次范围必须是数字'}), 400
+
+    lesson_start = max(1, lesson_start)
+    lesson_end = max(lesson_start, lesson_end)
+
+    if lesson_end - lesson_start > 30:
+        return jsonify({'error': '讲次范围过大，请控制在 30 讲以内'}), 400
+
+    lesson_name_map = {}
+    class_lesson_map = {}
+
+    for cls in selected_classes:
+        lessons = fetch_class_curriculum(token, cls['id']) or []
+        lesson_nums = []
+        for lesson in lessons:
+            try:
+                lesson_num = int(lesson.get('num', 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if lesson_num < lesson_start or lesson_num > lesson_end:
+                continue
+            lesson_nums.append(lesson_num)
+            if lesson_num not in lesson_name_map:
+                lesson_name_map[lesson_num] = lesson.get('name') or f"第{lesson_num}讲"
+        class_lesson_map[cls['id']] = sorted(set(lesson_nums))
+
+    lesson_nums_all = sorted({num for nums in class_lesson_map.values() for num in nums})
+    if not lesson_nums_all:
+        lesson_nums_all = list(range(lesson_start, lesson_end + 1))
+
+    for num in lesson_nums_all:
+        lesson_name_map.setdefault(num, f"第{num}讲")
+
+    jobs = []
+    for cls in selected_classes:
+        available_nums = class_lesson_map.get(cls['id'], [])
+        for lesson_num in lesson_nums_all:
+            if available_nums and lesson_num not in available_nums:
+                continue
+            jobs.append((cls, lesson_num))
+
+    if len(jobs) > 240:
+        return jsonify({'error': '请求规模过大，请减少班级数或缩小讲次范围'}), 400
+
+    class_result_map = {
+        cls['id']: {
+            'classId': cls['id'],
+            'className': cls['name'],
+            'classYear': cls['year'],
+            'timeText': cls.get('timeText', ''),
+            'timeLabel': cls.get('timeLabel', ''),
+            'lessons': {},
+            'students': {}
+        }
+        for cls in selected_classes
+    }
+
+    question_union = defaultdict(dict)
+    failed_pairs = []
+
+    def fetch_pair(class_info, lesson_num):
+        snapshot, err = fetch_lesson_question_snapshot(class_info['id'], token, lesson_num, teacherType)
+        return class_info, lesson_num, snapshot, err
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = [executor.submit(fetch_pair, cls, lesson_num) for cls, lesson_num in jobs]
+        for future in as_completed(futures):
+            class_info, lesson_num, snapshot, err = future.result()
+            lesson_key = str(lesson_num)
+
+            if err or not snapshot:
+                failed_pairs.append({
+                    'classId': class_info['id'],
+                    'className': class_info['name'],
+                    'lessonNum': lesson_num,
+                    'reason': (err or {}).get('error', 'unknown') if isinstance(err, dict) else 'unknown'
+                })
+                continue
+
+            class_entry = class_result_map[class_info['id']]
+            summary = snapshot.get('summary', {})
+
+            question_meta_map = {}
+            for q in snapshot.get('questions', []):
+                uid = q.get('uid')
+                if not uid:
+                    continue
+                sort_key = q.get('sortKey') or [999, 999, uid]
+                order_label = f"{sort_key[0]}.{sort_key[1]}" if len(sort_key) >= 2 else ''
+                question_meta = {
+                    'questionUid': uid,
+                    'practiceId': q.get('practiceId') or uid,
+                    'practiceName': q.get('practiceName') or '',
+                    'displayName': q.get('displayName') or (q.get('practiceId') or uid),
+                    'bundleLabel': q.get('bundleLabel') or '',
+                    'orderLabel': order_label,
+                    'sortKey': sort_key
+                }
+                question_meta_map[uid] = question_meta
+                if uid not in question_union[lesson_key]:
+                    question_union[lesson_key][uid] = question_meta
+
+            class_question_map = {}
+            for item in snapshot.get('classCells', []):
+                uid = item.get('questionUid')
+                if not uid:
+                    continue
+                class_question_map[uid] = {
+                    'accuracy': item.get('accuracy'),
+                    'correctCount': item.get('correctCount', 0),
+                    'answeredCount': item.get('answeredCount', 0)
+                }
+
+            class_entry['lessons'][lesson_key] = {
+                'accuracy': summary.get('accuracy'),
+                'correctCount': summary.get('correctCount', 0),
+                'answeredCount': summary.get('answeredCount', 0),
+                'questions': class_question_map
+            }
+
+            for stu in snapshot.get('students', []):
+                student_name = stu.get('studentName', '未知学员')
+                student_id = str(stu.get('studentId', '')).strip()
+                student_key = student_id or f"name::{student_name}"
+
+                student_entry = class_entry['students'].setdefault(student_key, {
+                    'studentId': student_id,
+                    'studentName': student_name,
+                    'lessons': {}
+                })
+
+                student_question_map = {}
+                for cell in stu.get('cells', []):
+                    uid = cell.get('questionUid')
+                    if not uid:
+                        continue
+                    student_question_map[uid] = {
+                        'accuracy': cell.get('accuracy'),
+                        'answered': bool(cell.get('answered')),
+                        'correct': bool(cell.get('correct')),
+                        'raw': cell.get('raw', '-')
+                    }
+
+                student_entry['lessons'][lesson_key] = {
+                    'accuracy': stu.get('accuracy'),
+                    'correctCount': stu.get('correctCount', 0),
+                    'answeredCount': stu.get('answeredCount', 0),
+                    'questions': student_question_map
+                }
+
+    classes_output = []
+    for cls in selected_classes:
+        class_entry = class_result_map[cls['id']]
+        students_sorted = sorted(class_entry['students'].values(), key=lambda x: x['studentName'])
+        class_entry['students'] = students_sorted
+        classes_output.append(class_entry)
+
+    lessons_output = [
+        {'num': num, 'key': str(num), 'name': lesson_name_map.get(num, f"第{num}讲")}
+        for num in lesson_nums_all
+    ]
+
+    question_columns = {}
+    for lesson in lessons_output:
+        lesson_key = lesson['key']
+        columns = list(question_union.get(lesson_key, {}).values())
+        columns.sort(key=lambda x: tuple(x.get('sortKey', [999, 999, x.get('practiceId', '')])))
+        for item in columns:
+            item.pop('sortKey', None)
+        question_columns[lesson_key] = columns
+
+    return jsonify({
+        'metric': 'accuracy',
+        'formula': '整体加权正确率=答对总题数/已作答总题数，未作答不计入分母',
+        'defaultView': {'row': 'class', 'column': 'lesson'},
+        'lessons': lessons_output,
+        'questionColumns': question_columns,
+        'classes': classes_output,
+        'meta': {
+            'selectedClassCount': len(selected_classes),
+            'selectedLessonCount': len(lessons_output),
+            'failedPairs': failed_pairs,
+            'failedCount': len(failed_pairs),
+            'generatedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+    })
 
 @app.route('/download')
 def download_csv():
