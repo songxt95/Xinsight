@@ -422,14 +422,19 @@ def pivot_accuracy_api():
                     continue
                 class_question_map[uid] = {
                     'accuracy': item.get('accuracy'),
+                    'completionRate': item.get('completionRate'),
                     'correctCount': item.get('correctCount', 0),
                     'answeredCount': item.get('answeredCount', 0)
                 }
 
             class_entry['lessons'][lesson_key] = {
                 'accuracy': summary.get('accuracy'),
+                'completionRate': summary.get('completionRate'),
                 'correctCount': summary.get('correctCount', 0),
                 'answeredCount': summary.get('answeredCount', 0),
+                'totalQuestionCount': summary.get('totalQuestionCount', 0),
+                'questionCount': summary.get('questionCount', 0),
+                'studentCount': summary.get('studentCount', 0),
                 'questions': class_question_map
             }
 
@@ -451,6 +456,7 @@ def pivot_accuracy_api():
                         continue
                     student_question_map[uid] = {
                         'accuracy': cell.get('accuracy'),
+                        'completionRate': cell.get('completionRate'),
                         'answered': bool(cell.get('answered')),
                         'correct': bool(cell.get('correct')),
                         'raw': cell.get('raw', '-')
@@ -458,6 +464,7 @@ def pivot_accuracy_api():
 
                 student_entry['lessons'][lesson_key] = {
                     'accuracy': stu.get('accuracy'),
+                    'completionRate': stu.get('completionRate'),
                     'correctCount': stu.get('correctCount', 0),
                     'answeredCount': stu.get('answeredCount', 0),
                     'questions': student_question_map
@@ -485,8 +492,17 @@ def pivot_accuracy_api():
         question_columns[lesson_key] = columns
 
     return jsonify({
-        'metric': 'accuracy',
-        'formula': '整体加权正确率=答对总题数/已作答总题数，未作答不计入分母',
+        'metric': 'completionRate',
+        'metrics': {
+            'completionRate': {
+                'label': '完成率',
+                'formula': '答对总题数/总题数'
+            },
+            'accuracy': {
+                'label': '正确率',
+                'formula': '答对总题数/已作答总题数，未作答不计入分母'
+            }
+        },
         'defaultView': {'row': 'class', 'column': 'lesson'},
         'lessons': lessons_output,
         'questionColumns': question_columns,

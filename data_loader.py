@@ -411,6 +411,9 @@ def fetch_lesson_question_snapshot(class_id, token, cuc_num, teacherType="0"):
         questions = sorted(question_meta.values(), key=lambda x: x['sortKey'])
         question_uids = [q['uid'] for q in questions]
 
+        student_count = len(students)
+        question_count = len(question_uids)
+
         class_correct = 0
         class_answered = 0
         class_cells = []
@@ -430,7 +433,8 @@ def fetch_lesson_question_snapshot(class_id, token, cuc_num, teacherType="0"):
                 'questionUid': uid,
                 'correctCount': q_correct,
                 'answeredCount': q_answered,
-                'accuracy': round((q_correct / q_answered) * 100, 2) if q_answered > 0 else None
+                'accuracy': round((q_correct / q_answered) * 100, 2) if q_answered > 0 else None,
+                'completionRate': round((q_correct / student_count) * 100, 2) if student_count > 0 else None
             })
 
         for stu in students:
@@ -450,20 +454,26 @@ def fetch_lesson_question_snapshot(class_id, token, cuc_num, teacherType="0"):
                     'raw': score,
                     'answered': cell_answered,
                     'correct': cell_correct,
-                    'accuracy': 100.0 if cell_correct else (0.0 if cell_answered else None)
+                    'accuracy': 100.0 if cell_correct else (0.0 if cell_answered else None),
+                    'completionRate': 100.0 if cell_correct else 0.0
                 })
 
             stu['correctCount'] = correct
             stu['answeredCount'] = answered
             stu['accuracy'] = round((correct / answered) * 100, 2) if answered > 0 else None
+            stu['completionRate'] = round((correct / question_count) * 100, 2) if question_count > 0 else None
             stu['cells'] = cells
 
+        total_question_count = student_count * question_count
+
         summary = {
-            'studentCount': len(students),
-            'questionCount': len(question_uids),
+            'studentCount': student_count,
+            'questionCount': question_count,
+            'totalQuestionCount': total_question_count,
             'correctCount': class_correct,
             'answeredCount': class_answered,
-            'accuracy': round((class_correct / class_answered) * 100, 2) if class_answered > 0 else None
+            'accuracy': round((class_correct / class_answered) * 100, 2) if class_answered > 0 else None,
+            'completionRate': round((class_correct / total_question_count) * 100, 2) if total_question_count > 0 else None
         }
 
         return {

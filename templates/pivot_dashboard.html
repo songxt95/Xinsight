@@ -33,6 +33,14 @@
         .bundle-head-homework { background-color: #DCFCE7; color: #15803D; }
         .bundle-head-exam { background-color: #FFEDD5; color: #C2410C; }
         .bundle-head-unknown { background-color: #F1F5F9; color: #475569; }
+
+        #main-table { border-collapse: separate; border-spacing: 0; }
+
+        /* 整个表头作为一个整体吸附，四行随之一起移动，行与行之间永远不会出现透明缝 */
+        #main-table thead { position: sticky; top: 0; z-index: 30; }
+
+        /* 表头单元格不再各自 sticky，仅保留背景不透明，避免下层内容透出 */
+        .sticky-head { background-clip: padding-box; }
     </style>
 </head>
 <body class="min-h-screen text-slate-800" x-data="pivotComponent()" x-cloak>
@@ -42,7 +50,7 @@
                 <div class="bg-amber-500 text-white p-1.5 rounded-lg font-bold">PV</div>
                 <div>
                     <div class="text-lg font-bold text-slate-900">班级透视看板</div>
-                    <div class="text-xs text-slate-500">指标：正确率（整体加权）</div>
+                    <div class="text-xs text-slate-500">班级透视看板（按讲次与题组对比）</div>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -156,9 +164,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="mt-3 text-[12px] text-slate-500">
-                    口径：正确率 = 答对总题数 / 已作答总题数，未作答不计入分母。
-                </div>
+                <div class="mt-3 text-[12px] text-slate-500" x-text="currentFormulaText"></div>
             </div>
 
             <template x-if="errorMsg">
@@ -184,10 +190,20 @@
 
             <div class="bg-white border border-slate-200 rounded-xl overflow-hidden" x-show="classes.length > 0">
                 <div class="px-4 py-3 border-b border-slate-200 bg-slate-50/80 flex flex-wrap gap-2 items-center justify-between">
-                    <div class="text-sm font-bold text-slate-700">透视矩阵（唯一指标：正确率）</div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="text-sm font-bold text-slate-700">透视矩阵</div>
+                        <div class="flex items-center gap-1 px-2 py-1 rounded border border-slate-300 bg-white text-xs">
+                            <span class="text-slate-500">指标：</span>
+                            <select x-model="activeMetric" class="border border-slate-300 rounded px-1.5 py-0.5 text-xs bg-white text-slate-700">
+                                <template x-for="opt in metricOptions" :key="'metric-'+opt.value">
+                                    <option :value="opt.value" x-text="opt.label"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
                     <div class="flex flex-wrap items-center gap-2 text-xs">
                         <div class="flex items-center gap-1 px-2 py-1 rounded border border-slate-300 bg-white">
-                            <span class="text-slate-500">题组：</span>
+                            <span class="text-slate-500">题组筛选：</span>
                             <template x-for="opt in bundleOptions" :key="'bundle-opt-'+opt">
                                 <label class="inline-flex items-center gap-1 text-[11px] text-slate-700 px-1">
                                     <input type="checkbox" :value="opt" :checked="selectedBundleLabels.includes(opt)" @change="toggleBundleFilter(opt)" class="rounded border-slate-300 text-indigo-600" />
@@ -207,12 +223,12 @@
                 <div class="w-full overflow-auto max-h-[72vh]">
                     <table class="w-full divide-y divide-slate-100 text-xs" id="main-table">
                         <thead class="bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
-                            <tr class="divide-x divide-slate-100">
-                                <th rowspan="4" class="sticky-left-header px-2 py-3 text-left border-r border-slate-200 w-56 align-middle">
+                            <tr class="divide-x divide-slate-100 pivot-head-row pivot-head-row-1">
+                                <th rowspan="4" class="sticky-left-header sticky-head sticky-head-row-1 px-2 py-3 text-left border-r border-slate-200 w-56 align-middle">
                                     <div class="flex items-center h-full">班级 / 学生</div>
                                 </th>
                                 <template x-for="(grp, gi) in lessonColumnGroups" :key="'grp-'+grp.lessonKey">
-                                    <th :colspan="grp.span" class="px-1 py-1 text-center border-b border-r border-slate-200 text-[11px]"
+                                    <th :colspan="grp.span" class="sticky-head sticky-head-row-1 px-1 py-1 text-center border-b border-r border-slate-200 text-[11px]"
                                         :class="[lessonGroupClass(grp.lessonKey), gi > 0 ? 'border-l-2 border-l-indigo-300' : '']">
                                         <button type="button" @click="toggleLessonExpand(grp.lessonKey)" class="w-full flex items-center justify-center gap-1.5 py-0.5 text-slate-700 hover:text-indigo-700">
                                             <span class="font-bold" x-text="grp.label"></span>
@@ -221,14 +237,14 @@
                                     </th>
                                 </template>
                             </tr>
-                            <tr class="divide-x divide-slate-100">
+                            <tr class="divide-x divide-slate-100 pivot-head-row pivot-head-row-2">
                                 <template x-for="bucket in lessonBucketGroups" :key="'bk-'+bucket.lessonKey+'-'+bucket.bundleKey+'-'+bucket.startColKey">
-                                    <th :colspan="bucket.span" class="px-1 py-1 text-center border-b border-r border-slate-200 text-[10px] normal-case"
+                                    <th :colspan="bucket.span" class="sticky-head sticky-head-row-2 px-1 py-1 text-center border-b border-r border-slate-200 text-[10px] normal-case"
                                         :class="[lessonSubHeaderClass(bucket.lessonKey), bundleHeaderClass(bucket.bundleLabel), bucket.isLessonStart ? 'border-l-2 border-l-indigo-300' : '']">
-                                        <template x-if="bucket.bundleLabel === '讲次总览'">
+                                        <template x-if="bucket.bundleLabel === '讲次汇总'">
                                             <span class="text-slate-600" x-text="bucket.bundleLabel"></span>
                                         </template>
-                                        <template x-if="bucket.bundleLabel !== '讲次总览'">
+                                        <template x-if="bucket.bundleLabel !== '讲次汇总'">
                                             <button type="button" @click="toggleBundleExpand(bucket.lessonKey, bucket.bundleLabel)" class="w-full flex items-center justify-center gap-1 text-slate-700 hover:text-indigo-700">
                                                 <span x-text="bucket.bundleLabel"></span>
                                                 <svg class="w-3 h-3 transition-transform" :class="isBundleExpanded(bucket.lessonKey, bucket.bundleLabel) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
@@ -237,17 +253,17 @@
                                     </th>
                                 </template>
                             </tr>
-                            <tr class="divide-x divide-slate-100">
+                            <tr class="divide-x divide-slate-100 pivot-head-row pivot-head-row-3">
                                 <template x-for="col in flatColumns" :key="'qh-'+col.key">
-                                    <th class="pivot-cell px-1 py-1 text-center font-mono border-b border-r border-slate-200 text-[10px] text-slate-500"
+                                    <th class="pivot-cell sticky-head sticky-head-row-3 px-1 py-1 text-center font-mono border-b border-r border-slate-200 text-[10px] text-slate-500"
                                         :class="[lessonSubHeaderClass(col.lessonKey), isLessonGroupStart(col) ? 'border-l-2 border-l-indigo-300' : '']">
                                         <span x-text="col.label"></span>
                                     </th>
                                 </template>
                             </tr>
-                            <tr class="divide-x divide-slate-100">
+                            <tr class="divide-x divide-slate-100 pivot-head-row pivot-head-row-4">
                                 <template x-for="col in flatColumns" :key="'qn-'+col.key">
-                                    <th class="pivot-cell px-1 py-1 text-center border-b border-r border-slate-200 text-[10px] normal-case align-middle"
+                                    <th class="pivot-cell sticky-head sticky-head-row-4 px-1 py-1 text-center border-b border-r border-slate-200 text-[10px] normal-case align-middle"
                                         :class="[lessonSubHeaderClass(col.lessonKey), isLessonGroupStart(col) ? 'border-l-2 border-l-indigo-300' : '']"
                                         :title="col.questionTitle || ''">
                                         <template x-if="col.type === 'lesson'">
@@ -315,6 +331,8 @@
                 questionColumns: {},
                 classes: [],
                 meta: null,
+                metricsMeta: {},
+                activeMetric: 'completionRate',
                 openedGroups: ['open'],
                 openedBuckets: [],
                 classKeyword: '',
@@ -330,10 +348,14 @@
                         .filter(g => g.key === 'open')
                         .flatMap(g => g.children.map(c => this.bucketKey(g.key, c.name)));
 
+                    window.addEventListener('resize', () => this.refreshStickyHeadOffsets());
+
                     this.refreshLessonOptions();
                     if (this.selectedClassIds.length > 0) {
                         this.loadPivot();
                     }
+
+                    this.refreshStickyHeadOffsets();
                 },
 
                 toggleClassById(classId) {
@@ -550,6 +572,27 @@
                         });
                     });
                     this.bundleExpandedMap = bundleMap;
+
+                    this.refreshStickyHeadOffsets();
+                },
+
+                refreshStickyHeadOffsets() {
+                    requestAnimationFrame(() => {
+                        const table = document.getElementById('main-table');
+                        if (!table) return;
+
+                        const rows = table.querySelectorAll('thead .pivot-head-row');
+                        if (!rows || rows.length === 0) return;
+
+                        // 累计高度时向上取整，并让每层向上重叠 1px（上层盖住下层顶部），
+                        // 物理消除亚像素渲染导致的透明缝
+                        let offset = 0;
+                        rows.forEach((row, idx) => {
+                            const top = idx === 0 ? 0 : Math.max(0, offset - 1);
+                            document.documentElement.style.setProperty(`--pivot-head-top-${idx + 1}`, `${top}px`);
+                            offset += Math.ceil(row.getBoundingClientRect().height);
+                        });
+                    });
                 },
 
                 isClassExpanded(classId) {
@@ -582,6 +625,7 @@
                         });
                         this.bundleExpandedMap = bundleMap;
                     }
+                    this.refreshStickyHeadOffsets();
                 },
 
                 bundleMapKey(lessonKey, bundleLabel) {
@@ -599,6 +643,7 @@
                         ...this.bundleExpandedMap,
                         [key]: !this.isBundleExpanded(lessonKey, bundleLabel)
                     };
+                    this.refreshStickyHeadOffsets();
                 },
 
                 get allClassesExpanded() {
@@ -657,6 +702,7 @@
                         nextMap[lesson.key] = shouldExpand;
                     });
                     this.lessonExpandedMap = nextMap;
+                    this.refreshStickyHeadOffsets();
                 },
 
                 get groupedClassTree() {
@@ -749,6 +795,8 @@
                         this.questionColumns = payload.questionColumns || {};
                         this.classes = payload.classes || [];
                         this.meta = payload.meta || null;
+                        this.metricsMeta = payload.metrics || {};
+                        this.activeMetric = payload.metric || 'completionRate';
                         this.ensureExpandMaps();
                     } catch (err) {
                         this.errorMsg = err.message || '透视数据加载失败';
@@ -756,6 +804,8 @@
                         this.questionColumns = {};
                         this.classes = [];
                         this.meta = null;
+                        this.metricsMeta = {};
+                        this.activeMetric = 'completionRate';
                     } finally {
                         this.loading = false;
                     }
@@ -771,7 +821,7 @@
                                 key: `lesson:${lessonKey}`,
                                 lessonKey,
                                 type: 'lesson',
-                                bundleLabel: '讲次总览',
+                                bundleLabel: '讲次汇总',
                                 label: `第${lesson.num}讲`,
                                 subLabel: ''
                             });
@@ -792,7 +842,7 @@
                                 key: `lesson:${lesson.key}:bundle:none-selected`,
                                 lessonKey,
                                 type: 'bundle-empty',
-                                bundleLabel: '未选择题组',
+                                bundleLabel: '未选择题组（占位）',
                                 label: '-',
                                 questionTitle: '-',
                                 subLabel: `第${lesson.num}讲`
@@ -811,7 +861,7 @@
                                 key: `lesson:${lesson.key}:bundle:none`,
                                 lessonKey,
                                 type: 'bundle-empty',
-                                bundleLabel: '未命中题组',
+                                bundleLabel: '本讲无所选题组（占位）',
                                 label: '-',
                                 questionTitle: '-',
                                 subLabel: `第${lesson.num}讲`
@@ -878,12 +928,13 @@
                 },
 
                 rowCellValue(row, col) {
+                    const metric = this.activeMetric || 'completionRate';
                     const lessonData = (row.type === 'class' ? row.classRef.lessons : row.studentRef.lessons) || {};
                     const lesson = lessonData[col.lessonKey];
                     if (!lesson) return null;
 
                     if (col.type === 'lesson') {
-                        return lesson.accuracy;
+                        return lesson?.[metric] ?? null;
                     }
 
                     if (col.type === 'bundle-empty') {
@@ -896,8 +947,9 @@
                         Object.entries(questionMap).forEach(([uid, cell]) => {
                             const meta = (this.questionColumns[col.lessonKey] || []).find(q => q.questionUid === uid);
                             const label = (meta?.bundleLabel || '未分类');
-                            if (label === col.bundleLabel && cell && cell.accuracy !== null && cell.accuracy !== undefined && !Number.isNaN(cell.accuracy)) {
-                                values.push(Number(cell.accuracy));
+                            const v = cell?.[metric];
+                            if (label === col.bundleLabel && v !== null && v !== undefined && !Number.isNaN(v)) {
+                                values.push(Number(v));
                             }
                         });
                         if (values.length === 0) return null;
@@ -908,7 +960,7 @@
                     if (!col.questionUid) return null;
                     const question = (lesson.questions || {})[col.questionUid];
                     if (!question) return null;
-                    return question.accuracy;
+                    return question?.[metric] ?? null;
                 },
 
                 get lessonColumnGroups() {
@@ -934,8 +986,8 @@
                     const groups = [];
                     let current = null;
                     this.flatColumns.forEach((col, idx) => {
-                        const isBundleType = col.type === 'question' || col.type === 'bundle-summary';
-                        const bucketLabel = isBundleType ? (col.bundleLabel || '未分类') : '讲次总览';
+                        const isBundleType = col.type === 'question' || col.type === 'bundle-summary' || col.type === 'bundle-empty';
+                        const bucketLabel = isBundleType ? (col.bundleLabel || '未分类') : '讲次汇总';
                         const bundleKey = `${col.lessonKey}::${bucketLabel}`;
 
                         if (!current || current.bundleKey !== bundleKey) {
@@ -975,7 +1027,7 @@
                     if (bundleLabel === '课堂') return 'bundle-head-class';
                     if (bundleLabel === '课后') return 'bundle-head-homework';
                     if (bundleLabel === '考试') return 'bundle-head-exam';
-                    if (bundleLabel === '讲次总览') return 'bundle-head-summary';
+                    if (bundleLabel === '讲次汇总') return 'bundle-head-summary';
                     return 'bundle-head-unknown';
                 },
 
@@ -985,6 +1037,37 @@
                     const idx = cols.findIndex(item => item.key === col.key);
                     if (idx <= 0) return false;
                     return cols[idx - 1].lessonKey !== col.lessonKey;
+                },
+
+                get metricOptions() {
+                    const map = this.metricsMeta || {};
+                    const entries = Object.entries(map);
+                    if (entries.length === 0) {
+                        return [
+                            { value: 'completionRate', label: '完成率（答对/总题）' },
+                            { value: 'accuracy', label: '正确率（答对/已作答）' }
+                        ];
+                    }
+                    return entries.map(([value, cfg]) => {
+                        if (value === 'completionRate') return { value, label: '完成率（答对/总题）' };
+                        if (value === 'accuracy') return { value, label: '正确率（答对/已作答）' };
+                        return { value, label: cfg?.label || value };
+                    });
+                },
+
+                get currentFormulaText() {
+                    const map = this.metricsMeta || {};
+                    const current = map[this.activeMetric] || {};
+                    if (current.formula) {
+                        const label = this.activeMetric === 'completionRate'
+                            ? '完成率（答对/总题）'
+                            : (this.activeMetric === 'accuracy' ? '正确率（答对/已作答）' : (current.label || this.activeMetric));
+                        return `当前指标口径：${label} = ${current.formula}`;
+                    }
+                    if (this.activeMetric === 'accuracy') {
+                        return '当前指标口径：正确率（答对/已作答） = 答对总题数 / 已作答总题数（未作答不计入分母）。';
+                    }
+                    return '当前指标口径：完成率（答对/总题） = 答对总题数 / 总题数。';
                 },
 
                 formatPct(v) {
