@@ -4,6 +4,7 @@ import os
 import time
 import datetime
 import logging
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 配置日志
@@ -27,9 +28,15 @@ _CLASS_LIST_CACHE_TTL = 300  # 5 分钟
 _PERFECT_SCORE_VALUES = {'100', '答题正确', '已订正'}
 _NON_ANSWERED_KEYWORDS = ('未打开', '未作答', '未运行')
 
+def _token_fingerprint(token):
+    """用 token 哈希做用户维度隔离，避免不同账号前缀相同导致缓存串用"""
+    if not token:
+        return ''
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()[:16]
+
+
 def _get_cache_key(token, class_id):
-    """取 token 前 8 位作为用户标识，避免完整 token 占用内存"""
-    return (token[:8] if token else '', class_id)
+    return (_token_fingerprint(token), class_id)
 
 # ... (perform_login, fetch_class_curriculum, fetch_class_list, fetch_class_detail 保持不变) ...
 def perform_login(username, password, teacherType='0'):
@@ -71,7 +78,7 @@ def fetch_class_curriculum(token, class_id):
 
 def fetch_class_list(token, search_range=180, teacherType="0"):
     # 检查班级列表内存缓存
-    list_cache_key = (token[:8] if token else '', search_range, teacherType)
+    list_cache_key = (_token_fingerprint(token), search_range, teacherType)
     now = time.time()
     if list_cache_key in _class_list_cache:
         cached_groups, cached_at = _class_list_cache[list_cache_key]
@@ -158,7 +165,7 @@ def fetch_class_list(token, search_range=180, teacherType="0"):
         for group in groups.values():
             for item in group:
                 if item.get('lessons'):
-                    warm_key = (token[:8] if token else '', item['id'])
+                    warm_key = (_token_fingerprint(token), item['id'])
                     if warm_key not in _curriculum_cache:
                         _curriculum_cache[warm_key] = (item['lessons'], now)
         logging.info(f"Class List Fetched & Cached for range={search_range}")
