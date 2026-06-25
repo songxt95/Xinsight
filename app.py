@@ -762,6 +762,12 @@ if __name__ == '__main__':
 
             server = CherootServer(('0.0.0.0', HTTPS_PORT), app, numthreads=20)
             server.ssl_adapter = BuiltinSSLAdapter(cert_file, key_file)
+
+            # 屏蔽自签证书握手告警噪音（浏览器未信任证书时的正常行为，不影响功能）
+            import logging as _logging
+            _logging.getLogger('cheroot.ssl').setLevel(_logging.ERROR)
+            _logging.getLogger('cheroot').setLevel(_logging.ERROR)
+
             try:
                 server.start()
             except KeyboardInterrupt:
