@@ -322,8 +322,12 @@
                     formData.append('zoom', this.zoomLevel || 1.0);
                     formData.append('cucNum', "{{ current_cuc_num }}");
 
-                    fetch('/export/image', { method: 'POST', body: formData })
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                    fetch('/export/image', { method: 'POST', body: formData, signal: controller.signal })
                     .then(response => {
+                        clearTimeout(timeoutId);
                         if (!response.ok) throw new Error('Export failed');
                         return response.blob();
                     })
@@ -351,7 +355,11 @@
                     })
                     .catch(error => {
                         console.error(error);
-                        alert('导出失败，请重试');
+                        if (error.name === 'AbortError') {
+                            alert('导出超时，请重试');
+                        } else {
+                            alert('导出失败，请重试');
+                        }
                         this.isExporting = false;
                     });
                 },

@@ -3,6 +3,8 @@ import csv
 import json
 import time
 import os
+import ssl
+import sys
 import secrets
 import logging
 from collections import defaultdict
@@ -51,22 +53,41 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
 
 def resolve_export_browser_executable():
-    """优先使用环境变量，其次回退到系统已安装浏览器路径。"""
+    """优先使用环境变量，其次回退到系统已安装浏览器路径（跨平台）。"""
     candidates = []
 
     env_path = os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE', '').strip()
     if env_path:
         candidates.append(env_path)
 
-    candidates.extend([
-        'C:/Program Files/Google/Chrome/Application/chrome.exe',
-        'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-        'C:/Program Files/Microsoft/Edge/Application/msedge.exe'
-    ])
+    if sys.platform == 'darwin':
+        # macOS
+        candidates.extend([
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        ])
+    elif sys.platform.startswith('linux'):
+        # Linux
+        candidates.extend([
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/microsoft-edge',
+        ])
+    else:
+        # Windows
+        candidates.extend([
+            'C:/Program Files/Google/Chrome/Application/chrome.exe',
+            'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+            'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+        ])
 
     for path in candidates:
         if path and os.path.exists(path):
             return path
+    # 都找不到时返回 None，Playwright 会回退到自带 chromium
     return None
 
 
@@ -545,6 +566,8 @@ def download_csv():
 
 @app.route('/export/image', methods=['POST'])
 def export_backend_image():
+    req_start = time.time()
+
     html_content = request.form.get('html', '')
     cuc_num = request.form.get('cucNum', '1')
     default_filename = f'xiaohou_stats_{cuc_num}.png'
@@ -553,7 +576,11 @@ def export_backend_image():
     width_param = request.form.get('width', '1920')
     zoom_param = request.form.get('zoom', '1.0')
 
-    if not html_content: return "Missing HTML content", 400
+    logging.info(f"[EXPORT] start ip={request.remote_addr} filename={filename} selector={selector} html_len={len(html_content)} width={width_param} zoom={zoom_param}")
+
+    if not html_content:
+        logging.warning("[EXPORT] missing html content")
+        return "Missing HTML content", 400
 
     try:
         with sync_playwright() as p:
@@ -562,13 +589,19 @@ def export_backend_image():
             if executable_path:
                 browser_launch_kwargs['executable_path'] = executable_path
 
+            logging.info("[EXPORT] launching browser")
             browser = p.chromium.launch(**browser_launch_kwargs)
-            try: viewport_width = int(float(width_param))
-            except: viewport_width = 1920
+            try:
+                viewport_width = int(float(width_param))
+            except Exception:
+                viewport_width = 1920
 
             context = browser.new_context(viewport={'width': viewport_width, 'height': 3000}, device_scale_factor=2)
             page = context.new_page()
+
+            logging.info("[EXPORT] set_content begin")
             page.set_content(html_content, wait_until="load")
+            logging.info("[EXPORT] set_content done")
 
             page.add_style_tag(content=f"""
                 nav, button, .no-print {{ display: none !important; }}
@@ -576,13 +609,19 @@ def export_backend_image():
                 #capture-area {{ zoom: {zoom_param} !important; transform-origin: top left !important; box-shadow: none !important; border: none !important; margin: 0 auto !important; max-width: none !important; width: 100% !important; }}
             """)
 
+            logging.info("[EXPORT] screenshot begin")
             locator = page.locator(selector)
             screenshot_bytes = locator.screenshot(type="png", omit_background=True)
+            logging.info(f"[EXPORT] screenshot done size={len(screenshot_bytes)}")
+
             browser.close()
+            elapsed = time.time() - req_start
+            logging.info(f"[EXPORT] done elapsed={elapsed:.2f}s")
 
             return send_file(io.BytesIO(screenshot_bytes), mimetype='image/png', as_attachment=True, download_name=filename)
     except Exception as e:
-        print(f"Playwright Error: {e}")
+        elapsed = time.time() - req_start
+        logging.exception(f"[EXPORT] failed elapsed={elapsed:.2f}s error={e}")
         return f"截图服务出错: {str(e)}", 500
 
 @app.route('/report/student')
@@ -706,24 +745,34 @@ if __name__ == '__main__':
     print("   XiaoHou Insight - 学情分析助手 Pro")
     if has_ssl:
         print("   Listening on: https://0.0.0.0:6927")
-        print("   [HTTPS] 剪贴板功能已启用")
+        print("   [HTTPS] 剪贴板功能已启用（cheroot + ssl）")
     else:
         print("   Listening on: http://0.0.0.0:6927")
         print("   [HTTP] 剪贴板功能不可用（需 HTTPS）")
-        print("   提示: 运行 generate_cert.bat 生成证书以启用 HTTPS")
+        print("   提示: 运行证书生成脚本后即可启用 HTTPS")
     print("========================================")
 
-    try:
-        from waitress import serve
-        if has_ssl:
-            # waitress 不支持 SSL，回退到 Flask 内置服务器
+    if has_ssl:
+        # HTTPS：使用 cheroot（原生支持 SSL、多线程、跨平台 Win/Mac/Linux）
+        try:
+            from cheroot.wsgi import Server as CherootServer
+            from cheroot.ssl.builtin import BuiltinSSLAdapter
+
+            server = CherootServer(('0.0.0.0', 6927), app, numthreads=20)
+            server.ssl_adapter = BuiltinSSLAdapter(cert_file, key_file)
+            try:
+                server.start()
+            except KeyboardInterrupt:
+                server.stop()
+        except ImportError:
+            # 没装 cheroot 时回退 Flask 内置 HTTPS（开发服务器）
+            print("[警告] 未安装 cheroot，回退 Flask 内置 HTTPS（不推荐用于多人）")
             app.run(debug=False, host='0.0.0.0', port=6927,
                     ssl_context=(cert_file, key_file), threaded=True)
-        else:
+    else:
+        # HTTP：使用 waitress（稳定、高并发）
+        try:
+            from waitress import serve
             serve(app, host='0.0.0.0', port=6927, threads=20, connection_limit=200)
-    except ImportError:
-        if has_ssl:
-            app.run(debug=False, host='0.0.0.0', port=6927,
-                    ssl_context=(cert_file, key_file), threaded=True)
-        else:
+        except ImportError:
             app.run(debug=False, host='0.0.0.0', port=6927)
