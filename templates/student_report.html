@@ -143,12 +143,34 @@
                         a.click();
                         window.URL.revokeObjectURL(url);
                         this.isExporting = false;
+
+                        // 同步写入剪贴板
+                        this.copyImageToClipboard(blob);
                     })
                     .catch(error => {
                         console.error(error);
                         alert('导出失败，请重试');
                         this.isExporting = false;
                     });
+                },
+
+                copyImageToClipboard(blob) {
+                    if (!navigator.clipboard || !window.ClipboardItem) {
+                        this.showClipboardHint('剪贴板不可用 ⚠️');
+                        return;
+                    }
+                    navigator.clipboard.write([
+                        new ClipboardItem({ 'image/png': blob })
+                    ]).then(() => {
+                        this.showClipboardHint('已复制到剪贴板 ✅');
+                    }).catch(() => {
+                        this.showClipboardHint('剪贴板不可用 ⚠️');
+                    });
+                },
+
+                showClipboardHint(text) {
+                    const type = text.includes('✅') ? 'success' : 'warning';
+                    window.dispatchEvent(new CustomEvent('clipboard-hint', { detail: { text, type } }));
                 },
 
                 exportAsCSV() {
@@ -242,6 +264,17 @@
     </script>
 </head>
 <body class="bg-slate-50 min-h-screen p-6 font-sans text-slate-800">
+
+    <!-- 剪贴板提示横幅 -->
+    <div x-data="{ show: false, text: '', type: 'success' }"
+         @clipboard-hint.window="text = $event.detail.text; type = $event.detail.type; show = true; clearTimeout(window.__cbTimer); window.__cbTimer = setTimeout(() => show = false, 3000)"
+         x-show="show"
+         x-transition
+         class="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium"
+         :class="type === 'success' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'"
+         style="display: none;">
+        <span x-text="text"></span>
+    </div>
 
     <div id="capture-area" class="max-w-5xl mx-auto space-y-6" x-data="reportData()" x-cloak>
 
