@@ -64,7 +64,7 @@ echo   - key.pem  (私钥)
 echo   - 有效期: 10 年
 echo   - 绑定 IP: %IP%
 echo.
-echo [3/3] 老师首次访问 https://%IP%:6927 时：
+echo [3/3] 老师首次访问 https://%IP%:6928 时：
 echo   1. 浏览器会提示"您的连接不是私密连接"
 echo   2. 点"高级" -> "继续前往 %IP%（不安全）"
 echo   3. 之后不再提示，剪贴板功能自动可用

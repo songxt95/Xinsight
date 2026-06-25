@@ -43,30 +43,41 @@ playwright install chromium
 
 ### 4. 启动服务
 
-直接运行主程序即可启动服务。项目使用了 `waitress` 支持高并发，服务默认在 `6927` 端口启动：
+直接运行主程序即可启动服务：
 
 ```bash
 python app.py
 
 ```
 
-启动成功后，您可以在控制台看到以下输出提示：
+服务采用**双端口并存**策略：
+
+| 协议 | 端口 | 服务器 | 剪贴板 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| HTTP | `6927` | waitress | ❌ | 始终开启，零配置，稳定 |
+| HTTPS | `6928` | cheroot | ✅ | 仅当根目录存在证书（`cert.pem`/`key.pem`）时开启 |
+
+> 未生成证书时只启动 HTTP（6927）；生成证书后会**同时**启动 HTTP（6927）和 HTTPS（6928），老师可按需选用。
+
+启动成功后，控制台会显示：
 
 ```text
 ========================================
    XiaoHou Insight - 学情分析助手 Pro
-   Listening on: [http://0.0.0.0:6927](http://0.0.0.0:6927)
+   [HTTP]  http://0.0.0.0:6927   (无剪贴板)
+   [HTTPS] https://0.0.0.0:6928  (支持剪贴板)
 ========================================
 
 ```
 
-在浏览器中访问 `http://localhost:6927` 即可打开系统界面。
+- 普通使用：浏览器访问 `http://localhost:6927`
+- 需要导出图片自动复制到剪贴板：访问 `https://<服务器IP>:6928`（见下方 HTTPS 说明）
 
 ## 🔒 启用 HTTPS（可选，用于剪贴板复制功能）
 
 浏览器的剪贴板 API（`navigator.clipboard.write`）只在**安全上下文**（HTTPS 或 `localhost`）下可用。
 如果老师通过**局域网 IP**（如 `http://192.168.1.69:6927`）访问，导出图片时无法自动复制到剪贴板。
-启用 HTTPS 后即可恢复该功能。
+生成证书后服务会在 `6928` 端口额外开启 HTTPS 入口，访问该入口即可恢复剪贴板功能（HTTP 6927 入口同时保留）。
 
 ### 1. 生成自签证书
 
@@ -83,19 +94,19 @@ python app.py
 
 执行后会在项目根目录生成 `cert.pem` 和 `key.pem`（有效期 10 年）。
 
-### 2. 启动服务（自动切换 HTTPS）
+### 2. 启动服务（自动开启 HTTPS）
 
-`app.py` 会自动检测：根目录存在 `cert.pem` + `key.pem` 时启用 **HTTPS（cheroot）**，否则保持 **HTTP（waitress）**。无需修改任何代码，直接：
+`app.py` 会自动检测：根目录存在 `cert.pem` + `key.pem` 时，在 HTTP（6927）之外**额外开启** HTTPS（6928，cheroot）。无需修改任何代码，直接：
 
 ```bash
 python app.py
 ```
 
-控制台会显示 `[HTTPS] 剪贴板功能已启用（cheroot + ssl）`。
+控制台会同时显示 `[HTTP]` 与 `[HTTPS]` 两个入口。
 
 ### 3. 老师首次访问
 
-访问 `https://<服务器IP>:6927`，浏览器会提示"您的连接不是私密连接"（自签证书所致）：
+访问 `https://<服务器IP>:6928`，浏览器会提示"您的连接不是私密连接"（自签证书所致）：
 点 **"高级" → "继续前往"** 即可，之后不再提示，导出图片即可自动复制到剪贴板。
 
 > ⚠️ `cert.pem` / `key.pem` 含私钥，已加入 `.gitignore`，请勿提交到仓库。
@@ -107,6 +118,6 @@ python app.py
 
 ## 📂 核心文件说明
 
-* `app.py`: Web 服务器的主入口，定义了路由、登录/退出逻辑、页面渲染、CSV 下载以及利用 Playwright 生成截图的 API；并根据证书是否存在自动在 HTTP(waitress)/HTTPS(cheroot) 之间切换。
+* `app.py`: Web 服务器的主入口，定义了路由、登录/退出逻辑、页面渲染、CSV 下载以及利用 Playwright 生成截图的 API；HTTP(6927/waitress) 始终开启，存在证书时额外并存 HTTPS(6928/cheroot)。
 * `data_loader.py`: 核心数据处理模块，封装了所有与底层 API 通信的接口，负责处理用户鉴权、数据清洗、多线程并行拉取数据及请求异常兜底处理。
 * `generate_cert.bat` / `generate_cert.sh`: 自签 HTTPS 证书生成脚本（分别用于 Windows 和 macOS/Linux）。

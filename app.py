@@ -736,43 +736,55 @@ def student_report_data_api():
     return jsonify({'stats': stats_map, 'history': history})
 
 if __name__ == '__main__':
-    # 检测自签证书，有则启用 HTTPS（剪贴板 API 需要安全上下文）
+    import threading
+
+    HTTP_PORT = 6927   # HTTP 入口（无剪贴板，零配置）
+    HTTPS_PORT = 6928  # HTTPS 入口（cheroot+SSL，支持剪贴板）
+
+    # 检测自签证书，有则同时启用 HTTPS（剪贴板 API 需要安全上下文）
     cert_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cert.pem')
     key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'key.pem')
     has_ssl = os.path.exists(cert_file) and os.path.exists(key_file)
 
-    print("========================================")
-    print("   XiaoHou Insight - 学情分析助手 Pro")
-    if has_ssl:
-        print("   Listening on: https://0.0.0.0:6927")
-        print("   [HTTPS] 剪贴板功能已启用（cheroot + ssl）")
-    else:
-        print("   Listening on: http://0.0.0.0:6927")
-        print("   [HTTP] 剪贴板功能不可用（需 HTTPS）")
-        print("   提示: 运行证书生成脚本后即可启用 HTTPS")
-    print("========================================")
+    def run_http():
+        """HTTP 服务（waitress，稳定高并发）。"""
+        try:
+            from waitress import serve
+            serve(app, host='0.0.0.0', port=HTTP_PORT, threads=20, connection_limit=200)
+        except ImportError:
+            app.run(debug=False, host='0.0.0.0', port=HTTP_PORT)
 
-    if has_ssl:
-        # HTTPS：使用 cheroot（原生支持 SSL、多线程、跨平台 Win/Mac/Linux）
+    def run_https():
+        """HTTPS 服务（cheroot 原生 SSL，跨平台），失败回退 Flask 内置。"""
         try:
             from cheroot.wsgi import Server as CherootServer
             from cheroot.ssl.builtin import BuiltinSSLAdapter
 
-            server = CherootServer(('0.0.0.0', 6927), app, numthreads=20)
+            server = CherootServer(('0.0.0.0', HTTPS_PORT), app, numthreads=20)
             server.ssl_adapter = BuiltinSSLAdapter(cert_file, key_file)
             try:
                 server.start()
             except KeyboardInterrupt:
                 server.stop()
         except ImportError:
-            # 没装 cheroot 时回退 Flask 内置 HTTPS（开发服务器）
-            print("[警告] 未安装 cheroot，回退 Flask 内置 HTTPS（不推荐用于多人）")
-            app.run(debug=False, host='0.0.0.0', port=6927,
+            print("[警告] 未安装 cheroot，HTTPS 回退 Flask 内置（不推荐用于多人）")
+            app.run(debug=False, host='0.0.0.0', port=HTTPS_PORT,
                     ssl_context=(cert_file, key_file), threaded=True)
+
+    print("========================================")
+    print("   XiaoHou Insight - 学情分析助手 Pro")
+    print(f"   [HTTP]  http://0.0.0.0:{HTTP_PORT}   (无剪贴板)")
+    if has_ssl:
+        print(f"   [HTTPS] https://0.0.0.0:{HTTPS_PORT}  (支持剪贴板)")
     else:
-        # HTTP：使用 waitress（稳定、高并发）
-        try:
-            from waitress import serve
-            serve(app, host='0.0.0.0', port=6927, threads=20, connection_limit=200)
-        except ImportError:
-            app.run(debug=False, host='0.0.0.0', port=6927)
+        print(f"   [HTTPS] 未启用 — 运行证书生成脚本后将在 {HTTPS_PORT} 端口开启")
+    print("========================================")
+
+    if has_ssl:
+        # 双端口并存：HTTP 放后台线程，HTTPS 跑主线程（便于 Ctrl+C 退出）
+        http_thread = threading.Thread(target=run_http, daemon=True)
+        http_thread.start()
+        run_https()
+    else:
+        # 无证书时只起 HTTP
+        run_http()
