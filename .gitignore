@@ -43,3 +43,7 @@ Thumbs.db
 # 虽然 Playwright 浏览器通常在系统目录，但防止本地缓存
 browser/
 pw-browsers/
+
+# === HTTPS 自签证书 (不要提交到仓库) ===
+cert.pem
+key.pem

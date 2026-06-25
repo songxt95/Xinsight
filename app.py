@@ -697,14 +697,33 @@ def student_report_data_api():
     return jsonify({'stats': stats_map, 'history': history})
 
 if __name__ == '__main__':
+    # 检测自签证书，有则启用 HTTPS（剪贴板 API 需要安全上下文）
+    cert_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cert.pem')
+    key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'key.pem')
+    has_ssl = os.path.exists(cert_file) and os.path.exists(key_file)
+
     print("========================================")
     print("   XiaoHou Insight - 学情分析助手 Pro")
-    print("   Listening on: http://0.0.0.0:6927")
+    if has_ssl:
+        print("   Listening on: https://0.0.0.0:6927")
+        print("   [HTTPS] 剪贴板功能已启用")
+    else:
+        print("   Listening on: http://0.0.0.0:6927")
+        print("   [HTTP] 剪贴板功能不可用（需 HTTPS）")
+        print("   提示: 运行 generate_cert.bat 生成证书以启用 HTTPS")
     print("========================================")
 
     try:
         from waitress import serve
-        serve(app, host='0.0.0.0', port=6927, threads=20, connection_limit=200)
+        if has_ssl:
+            # waitress 不支持 SSL，回退到 Flask 内置服务器
+            app.run(debug=False, host='0.0.0.0', port=6927,
+                    ssl_context=(cert_file, key_file), threaded=True)
+        else:
+            serve(app, host='0.0.0.0', port=6927, threads=20, connection_limit=200)
     except ImportError:
-        print("[警告] 未安装 waitress，请安装以支持并发访问。")
-        app.run(debug=False, host='0.0.0.0', port=6927)
+        if has_ssl:
+            app.run(debug=False, host='0.0.0.0', port=6927,
+                    ssl_context=(cert_file, key_file), threaded=True)
+        else:
+            app.run(debug=False, host='0.0.0.0', port=6927)

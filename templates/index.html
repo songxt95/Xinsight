@@ -357,17 +357,21 @@
                 },
 
                 copyImageToClipboard(blob) {
-                    if (!navigator.clipboard || !window.ClipboardItem) {
+                    try {
+                        if (!navigator.clipboard || !window.ClipboardItem || !window.isSecureContext) {
+                            this.showClipboardHint('剪贴板不可用 ⚠️');
+                            return;
+                        }
+                        navigator.clipboard.write([
+                            new ClipboardItem({ 'image/png': blob })
+                        ]).then(() => {
+                            this.showClipboardHint('已复制到剪贴板 ✅');
+                        }).catch(() => {
+                            this.showClipboardHint('剪贴板不可用 ⚠️');
+                        });
+                    } catch (e) {
                         this.showClipboardHint('剪贴板不可用 ⚠️');
-                        return;
                     }
-                    navigator.clipboard.write([
-                        new ClipboardItem({ 'image/png': blob })
-                    ]).then(() => {
-                        this.showClipboardHint('已复制到剪贴板 ✅');
-                    }).catch(() => {
-                        this.showClipboardHint('剪贴板不可用 ⚠️');
-                    });
                 },
 
                 showClipboardHint(text) {
